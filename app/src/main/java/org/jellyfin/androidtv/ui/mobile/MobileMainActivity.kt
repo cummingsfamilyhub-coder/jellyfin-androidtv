@@ -6,6 +6,16 @@ import android.widget.ImageView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import org.jellyfin.androidtv.R
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -187,6 +197,14 @@ private data class MobileHomeState(
     val services: List<BaseItemDto> = emptyList(),
 )
 
+private enum class MobileTab(val label: String, val icon: String) {
+    HOME("Home", "⌂"),
+    MOVIES("Movies", "▣"),
+    TV("TV", "▤"),
+    MYV("MyV", "♥"),
+    SEARCH("Search", "⌕"),
+}
+
 @Composable
 private fun VesperMobile(
     state: MobileHomeState,
@@ -198,13 +216,65 @@ private fun VesperMobile(
     onRetry: () -> Unit,
     onPlay: (BaseItemDto) -> Unit,
 ) {
-    val bg = Color(0xFF05080C)
-    Box(Modifier.fillMaxSize().background(bg)) {
+    var tab by remember { mutableStateOf(MobileTab.HOME) }
+
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF05080C))
+    ) {
+        val expanded = maxWidth >= 600.dp
+
         if (selected != null) {
             BackHandler(onBack = onBack)
             MobileDetails(selected, api, onBack, onPlay)
         } else {
-            MobileHome(state, userName, api, onSelect, onRetry)
+            BackHandler(enabled = tab != MobileTab.HOME) { tab = MobileTab.HOME }
+
+            when (tab) {
+                MobileTab.HOME -> MobileHome(
+                    state = state,
+                    userName = userName,
+                    api = api,
+                    onSelect = onSelect,
+                    onRetry = onRetry,
+                    onPlay = onPlay,
+                    expanded = expanded,
+                )
+                MobileTab.MOVIES -> LibraryBrowse(
+                    title = "Movies",
+                    media = state.movies,
+                    api = api,
+                    onSelect = onSelect,
+                    expanded = expanded,
+                )
+                MobileTab.TV -> LibraryBrowse(
+                    title = "TV Shows",
+                    media = state.shows,
+                    api = api,
+                    onSelect = onSelect,
+                    expanded = expanded,
+                )
+                MobileTab.MYV -> LibraryBrowse(
+                    title = "MyV",
+                    media = state.myV,
+                    api = api,
+                    onSelect = onSelect,
+                    expanded = expanded,
+                )
+                MobileTab.SEARCH -> SearchBrowse(
+                    state = state,
+                    api = api,
+                    onSelect = onSelect,
+                    expanded = expanded,
+                )
+            }
+
+            MobileBottomNav(
+                active = tab,
+                onSelect = { tab = it },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
     }
 }
@@ -216,32 +286,14 @@ private fun MobileHome(
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
     onRetry: () -> Unit,
+    onPlay: (BaseItemDto) -> Unit,
+    expanded: Boolean,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 42.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 92.dp),
     ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BasicText(
-                    "V",
-                    style = TextStyle(color = Color(0xFFBDEBFF), fontSize = 27.sp, fontWeight = FontWeight.Black),
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(15.dp))
-                        .background(Color(0xFF13222E))
-                        .padding(start = 15.dp, top = 8.dp),
-                )
-                Spacer(Modifier.width(13.dp))
-                Column {
-                    BasicText("Vesper", style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold))
-                    BasicText(userName, style = TextStyle(color = Color(0xFF8D99A7), fontSize = 13.sp))
-                }
-            }
-        }
+        item { MobileTopBar(userName) }
 
         if (state.loading) {
             item {
@@ -254,7 +306,10 @@ private fun MobileHome(
         } else if (state.error != null) {
             item {
                 Column(Modifier.padding(20.dp)) {
-                    BasicText("Couldn't load your library", style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+                    BasicText(
+                        "Couldn't load your library",
+                        style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                    )
                     Spacer(Modifier.height(7.dp))
                     BasicText(state.error, style = TextStyle(color = Color(0xFF9CA9B7), fontSize = 14.sp))
                     Spacer(Modifier.height(16.dp))
@@ -262,29 +317,188 @@ private fun MobileHome(
                 }
             }
         } else {
-            if (state.continueWatching.isNotEmpty()) item { MediaRow("Continue Watching", state.continueWatching, api, onSelect, landscape = true) }
-            if (state.myV.isNotEmpty()) item { MediaRow("MyV", state.myV, api, onSelect) }
-            if (state.movies.isNotEmpty()) item { MediaRow("Movies", state.movies, api, onSelect) }
-            if (state.shows.isNotEmpty()) item { MediaRow("TV Shows", state.shows, api, onSelect) }
-            if (state.services.isNotEmpty()) item { MediaRow("Services", state.services, api, onSelect, landscape = true) }
+            val hero = state.continueWatching.firstOrNull()
+                ?: state.movies.firstOrNull()
+                ?: state.shows.firstOrNull()
 
-            if (
-                state.continueWatching.isEmpty() &&
-                state.myV.isEmpty() &&
-                state.movies.isEmpty() &&
-                state.shows.isEmpty() &&
-                state.services.isEmpty()
-            ) {
+            if (hero != null) {
                 item {
-                    BasicText(
-                        "Connected, but Jellyfin returned no video items.",
-                        style = TextStyle(color = Color(0xFF9CA9B7), fontSize = 16.sp),
-                        modifier = Modifier.padding(20.dp),
+                    VesperHero(
+                        item = hero,
+                        api = api,
+                        expanded = expanded,
+                        onPlay = onPlay,
+                        onInfo = { onSelect(hero) },
                     )
                 }
             }
+
+            if (state.continueWatching.isNotEmpty()) item {
+                MediaRow("Continue Watching", state.continueWatching, api, onSelect, landscape = true)
+            }
+            if (state.myV.isNotEmpty()) item { MediaRow("MyV", state.myV, api, onSelect) }
+            if (state.movies.isNotEmpty()) item { MediaRow("Movies", state.movies, api, onSelect) }
+            if (state.shows.isNotEmpty()) item { MediaRow("TV Shows", state.shows, api, onSelect) }
+            if (state.services.isNotEmpty()) item {
+                MediaRow("Services", state.services, api, onSelect, landscape = true)
+            }
         }
     }
+}
+
+@Composable
+private fun MobileTopBar(userName: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.vesper_icon),
+            contentDescription = "Vesper",
+            modifier = Modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(13.dp)),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                "Vesper",
+                style = TextStyle(color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold),
+            )
+            BasicText(
+                "Your library",
+                style = TextStyle(color = Color(0xFF8492A0), fontSize = 12.sp),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xFF172632)),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                userName.take(1).uppercase(),
+                style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold),
+            )
+        }
+    }
+}
+
+@Composable
+private fun VesperHero(
+    item: BaseItemDto,
+    api: ApiClient,
+    expanded: Boolean,
+    onPlay: (BaseItemDto) -> Unit,
+    onInfo: () -> Unit,
+) {
+    val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages[ImageType.PRIMARY]
+    val heroHeight = if (expanded) 390.dp else 330.dp
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(heroHeight)
+            .padding(horizontal = if (expanded) 22.dp else 12.dp)
+            .clip(RoundedCornerShape(if (expanded) 22.dp else 18.dp))
+            .background(Color(0xFF111820)),
+    ) {
+        AsyncImage(
+            modifier = Modifier.fillMaxSize(),
+            url = image?.getUrl(api),
+            blurHash = image?.blurHash,
+            scaleType = ImageView.ScaleType.CENTER_CROP,
+        )
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color(0x2205080C),
+                            Color(0xF205080C),
+                        ),
+                        startY = 80f,
+                    )
+                )
+        )
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth(if (expanded) .58f else .92f)
+                .padding(22.dp),
+        ) {
+            BasicText(
+                if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "CONTINUE WATCHING" else "FEATURED",
+                style = TextStyle(
+                    color = Color(0xFFBCEBFF),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
+                ),
+            )
+            Spacer(Modifier.height(7.dp))
+            BasicText(
+                item.name ?: "Untitled",
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = if (expanded) 42.sp else 34.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = if (expanded) 45.sp else 37.sp,
+                ),
+                maxLines = 2,
+            )
+
+            val metadata = listOfNotNull(
+                item.productionYear?.toString(),
+                item.officialRating,
+                when (item.type) {
+                    BaseItemKind.MOVIE -> "Movie"
+                    BaseItemKind.SERIES -> "TV Series"
+                    BaseItemKind.EPISODE -> listOfNotNull(
+                        item.parentIndexNumber?.let { "S$it" },
+                        item.indexNumber?.let { "E$it" },
+                    ).joinToString("")
+                    else -> null
+                },
+            ).filter { it.isNotBlank() }.joinToString("  •  ")
+
+            if (metadata.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                BasicText(
+                    metadata,
+                    style = TextStyle(color = Color(0xFFC1CAD3), fontSize = 13.sp),
+                )
+            }
+
+            if (!expanded && !item.overview.isNullOrBlank()) {
+                Spacer(Modifier.height(10.dp))
+                BasicText(
+                    item.overview.orEmpty(),
+                    style = TextStyle(color = Color(0xFFD4DAE0), fontSize = 14.sp, lineHeight = 19.sp),
+                    maxLines = 2,
+                )
+            }
+
+            Spacer(Modifier.height(15.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                VesperButton(
+                    if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
+                    { onPlay(item) },
+                )
+                DarkButton("More Info", onInfo)
+            }
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
 }
 
 @Composable
@@ -295,7 +509,7 @@ private fun MediaRow(
     onSelect: (BaseItemDto) -> Unit,
     landscape: Boolean = false,
 ) {
-    Column(Modifier.padding(top = 17.dp)) {
+    Column(Modifier.padding(top = 14.dp)) {
         BasicText(
             title,
             style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold),
@@ -321,7 +535,11 @@ private fun MediaCard(
 ) {
     val w = if (landscape) 210.dp else 132.dp
     val h = if (landscape) 122.dp else 198.dp
-    val image = item.itemImages[ImageType.PRIMARY]
+    val image = if (landscape) {
+        item.itemBackdropImages.firstOrNull() ?: item.itemImages[ImageType.PRIMARY]
+    } else {
+        item.itemImages[ImageType.PRIMARY]
+    }
 
     Column(
         modifier = Modifier.width(w).clickable { onSelect(item) },
@@ -339,6 +557,7 @@ private fun MediaCard(
                 blurHash = image?.blurHash,
                 scaleType = ImageView.ScaleType.CENTER_CROP,
             )
+
             if (item.userData?.isFavorite == true) {
                 BasicText(
                     "♥",
@@ -346,20 +565,295 @@ private fun MediaCard(
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 )
             }
+
+            if (landscape) {
+                val runtime = item.runTimeTicks ?: 0L
+                val position = item.userData?.playbackPositionTicks ?: 0L
+                if (runtime > 0L && position > 0L) {
+                    val progress = (position.toFloat() / runtime.toFloat()).coerceIn(0f, 1f)
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(Color(0x55000000))
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(progress)
+                                .height(3.dp)
+                                .background(Color(0xFF8BD8FF))
+                        )
+                    }
+                }
+            }
         }
+
         Spacer(Modifier.height(7.dp))
         BasicText(
             item.name ?: "Untitled",
             style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
             maxLines = 1,
         )
+
         val secondary = when (item.type) {
-            BaseItemKind.EPISODE -> listOfNotNull(item.seriesName, item.parentIndexNumber?.let { "S$it" }, item.indexNumber?.let { "E$it" }).joinToString(" • ")
+            BaseItemKind.EPISODE -> listOfNotNull(
+                item.seriesName,
+                item.parentIndexNumber?.let { "S$it" },
+                item.indexNumber?.let { "E$it" },
+            ).joinToString(" • ")
             else -> item.productionYear?.toString().orEmpty()
         }
+
         if (secondary.isNotBlank()) {
-            BasicText(secondary, style = TextStyle(color = Color(0xFF8F9CAA), fontSize = 12.sp), maxLines = 1)
+            BasicText(
+                secondary,
+                style = TextStyle(color = Color(0xFF8F9CAA), fontSize = 12.sp),
+                maxLines = 1,
+            )
         }
+    }
+}
+
+@Composable
+private fun LibraryBrowse(
+    title: String,
+    media: List<BaseItemDto>,
+    api: ApiClient,
+    onSelect: (BaseItemDto) -> Unit,
+    expanded: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 18.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+            BasicText(
+                title,
+                style = TextStyle(color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold),
+            )
+            BasicText(
+                "${media.size} items",
+                style = TextStyle(color = Color(0xFF81909E), fontSize = 13.sp),
+            )
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        if (media.isEmpty()) {
+            BasicText(
+                "Nothing here yet.",
+                style = TextStyle(color = Color(0xFF95A2AF), fontSize = 15.sp),
+                modifier = Modifier.padding(20.dp),
+            )
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(if (expanded) 5 else 3),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 8.dp,
+                    bottom = 98.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                gridItems(media, key = { it.id }) { item ->
+                    GridMediaCard(item, api, onSelect)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchBrowse(
+    state: MobileHomeState,
+    api: ApiClient,
+    onSelect: (BaseItemDto) -> Unit,
+    expanded: Boolean,
+) {
+    var query by remember { mutableStateOf("") }
+    val all = remember(state) {
+        (state.continueWatching + state.myV + state.movies + state.shows)
+            .distinctBy { it.id }
+    }
+    val results = if (query.isBlank()) all else all.filter { item ->
+        val haystack = listOfNotNull(
+            item.name,
+            item.seriesName,
+            item.productionYear?.toString(),
+        ).joinToString(" ").lowercase()
+        haystack.contains(query.trim().lowercase())
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 18.dp),
+    ) {
+        BasicText(
+            "Search",
+            style = TextStyle(color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(Color(0xFF101821))
+                .padding(horizontal = 15.dp, vertical = 13.dp),
+        ) {
+            if (query.isBlank()) {
+                BasicText(
+                    "Movies and TV shows",
+                    style = TextStyle(color = Color(0xFF657482), fontSize = 16.sp),
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = { query = it },
+                textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                cursorBrush = SolidColor(Color(0xFF8BD8FF)),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(if (expanded) 5 else 3),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 10.dp,
+                bottom = 98.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            gridItems(results, key = { it.id }) { item ->
+                GridMediaCard(item, api, onSelect)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GridMediaCard(
+    item: BaseItemDto,
+    api: ApiClient,
+    onSelect: (BaseItemDto) -> Unit,
+) {
+    val image = item.itemImages[ImageType.PRIMARY]
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect(item) },
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF111A23)),
+        ) {
+            AsyncImage(
+                modifier = Modifier.fillMaxSize(),
+                url = image?.getUrl(api),
+                blurHash = image?.blurHash,
+                scaleType = ImageView.ScaleType.CENTER_CROP,
+            )
+            if (item.userData?.isFavorite == true) {
+                BasicText(
+                    "♥",
+                    style = TextStyle(color = Color.White, fontSize = 15.sp),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(7.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+        BasicText(
+            item.name ?: "Untitled",
+            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+            maxLines = 1,
+        )
+        BasicText(
+            item.productionYear?.toString().orEmpty(),
+            style = TextStyle(color = Color(0xFF7F8D9A), fontSize = 11.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun MobileBottomNav(
+    active: MobileTab,
+    onSelect: (MobileTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xF405080C))
+            .padding(start = 6.dp, end = 6.dp, top = 8.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MobileTab.entries.forEach { tab ->
+            val selected = tab == active
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(13.dp))
+                    .clickable { onSelect(tab) }
+                    .background(if (selected) Color(0xFF101C25) else Color.Transparent)
+                    .padding(vertical = 7.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                BasicText(
+                    tab.icon,
+                    style = TextStyle(
+                        color = if (selected) Color(0xFFBDEBFF) else Color(0xFF7C8996),
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+                Spacer(Modifier.height(2.dp))
+                BasicText(
+                    tab.label,
+                    style = TextStyle(
+                        color = if (selected) Color.White else Color(0xFF7C8996),
+                        fontSize = 10.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DarkButton(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xAA111820))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 17.dp, vertical = 11.dp),
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+        )
     }
 }
 
