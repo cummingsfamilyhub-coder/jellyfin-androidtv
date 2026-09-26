@@ -320,7 +320,19 @@ private fun VesperMobile(
 
         if (selected != null) {
             BackHandler(onBack = onBack)
-            MobileDetails(selected, api, onBack, onPlay, onToggleFavorite)
+            if (selected.type == BaseItemKind.BOX_SET) {
+                CollectionBrowser(
+                    collection = selected,
+                    service = isServiceCollection(selected),
+                    api = api,
+                    onBack = onBack,
+                    onSelect = onSelect,
+                    onToggleFavorite = onToggleFavorite,
+                    expanded = expanded,
+                )
+            } else {
+                MobileDetails(selected, api, onBack, onPlay, onToggleFavorite)
+            }
         } else {
             BackHandler(enabled = tab != MobileTab.HOME) { tab = MobileTab.HOME }
 
@@ -457,6 +469,8 @@ private fun MobileHome(
                     landscape = true,
                     subtitle = "Availability data by JustWatch",
                     nameFormatter = { serviceDisplayName(it.name) },
+                    showFavorite = false,
+                    providerTiles = true,
                 )
             }
             if (state.collections.isNotEmpty()) item {
@@ -468,6 +482,7 @@ private fun MobileHome(
                     onToggleFavorite = onToggleFavorite,
                     landscape = true,
                     nameFormatter = { collectionDisplayName(it.name) },
+                    showFavorite = false,
                 )
             }
         }
@@ -709,6 +724,8 @@ private fun MediaRow(
     landscape: Boolean = false,
     subtitle: String? = null,
     nameFormatter: (BaseItemDto) -> String = { it.name ?: "Untitled" },
+    showFavorite: Boolean = true,
+    providerTiles: Boolean = false,
 ) {
     Column(Modifier.padding(top = 14.dp)) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
@@ -729,7 +746,16 @@ private fun MediaRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(media, key = { it.id }) { item ->
-                MediaCard(item, api, landscape, onSelect, onToggleFavorite, nameFormatter)
+                MediaCard(
+                    item = item,
+                    api = api,
+                    landscape = landscape,
+                    onSelect = onSelect,
+                    onToggleFavorite = onToggleFavorite,
+                    nameFormatter = nameFormatter,
+                    showFavorite = showFavorite,
+                    providerTile = providerTiles,
+                )
             }
         }
     }
@@ -743,6 +769,8 @@ private fun MediaCard(
     onSelect: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
     nameFormatter: (BaseItemDto) -> String = { it.name ?: "Untitled" },
+    showFavorite: Boolean = true,
+    providerTile: Boolean = false,
 ) {
     val w = if (landscape) 210.dp else 132.dp
     val h = if (landscape) 122.dp else 198.dp
@@ -762,31 +790,40 @@ private fun MediaCard(
                 .clip(RoundedCornerShape(13.dp))
                 .background(Color(0xFF111A23)),
         ) {
-            AsyncImage(
-                modifier = Modifier.fillMaxSize(),
-                url = image?.getUrl(api),
-                blurHash = image?.blurHash,
-                scaleType = ImageView.ScaleType.CENTER_CROP,
-            )
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(7.dp)
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0x9905080C))
-                    .clickable { onToggleFavorite(item) },
-                contentAlignment = Alignment.Center,
-            ) {
-                BasicText(
-                    if (item.userData?.isFavorite == true) "♥" else "♡",
-                    style = TextStyle(
-                        color = if (item.userData?.isFavorite == true) Color(0xFFFF4D7A) else Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
+            if (providerTile) {
+                ProviderWordmark(
+                    name = serviceDisplayName(item.name),
+                    modifier = Modifier.fillMaxSize(),
                 )
+            } else {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = image?.getUrl(api),
+                    blurHash = image?.blurHash,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            }
+
+            if (showFavorite) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(7.dp)
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0x9905080C))
+                        .clickable { onToggleFavorite(item) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(
+                        if (item.userData?.isFavorite == true) "♥" else "♡",
+                        style = TextStyle(
+                            color = if (item.userData?.isFavorite == true) Color(0xFFFF4D7A) else Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                    )
+                }
             }
 
             if (landscape) {
@@ -828,12 +865,224 @@ private fun MediaCard(
             else -> item.productionYear?.toString().orEmpty()
         }
 
-        if (secondary.isNotBlank()) {
+        if (!providerTile && secondary.isNotBlank() && item.type != BaseItemKind.BOX_SET) {
             BasicText(
                 secondary,
                 style = TextStyle(color = Color(0xFF8F9CAA), fontSize = 12.sp),
                 maxLines = 1,
             )
+        }
+    }
+}
+
+@Composable
+private fun ProviderWordmark(
+    name: String,
+    modifier: Modifier = Modifier,
+) {
+    val normalized = name.trim().lowercase()
+    val (label, foreground, background) = when {
+        normalized.contains("netflix") -> Triple("NETFLIX", Color(0xFFE50914), Color(0xFF050505))
+        normalized.contains("disney") -> Triple("Disney+", Color.White, Color(0xFF102A56))
+        normalized.contains("amazon") || normalized.contains("prime") -> Triple("prime video", Color(0xFF00A8E1), Color(0xFF07141D))
+        normalized.contains("apple") -> Triple(" tv+", Color.White, Color.Black)
+        normalized.contains("paramount") -> Triple("Paramount+", Color.White, Color(0xFF0A4EE4))
+        normalized == "max" || normalized.contains("hbo") -> Triple("max", Color.White, Color(0xFF24105C))
+        normalized.startsWith("now") -> Triple("NOW", Color(0xFF00FF85), Color(0xFF09130E))
+        else -> Triple(name, Color.White, Color(0xFF111A23))
+    }
+
+    Box(
+        modifier = modifier.background(background),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(
+                color = foreground,
+                fontSize = when {
+                    label.length > 12 -> 22.sp
+                    label.length > 8 -> 26.sp
+                    else -> 32.sp
+                },
+                fontWeight = FontWeight.Black,
+            ),
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun CollectionBrowser(
+    collection: BaseItemDto,
+    service: Boolean,
+    api: ApiClient,
+    onBack: () -> Unit,
+    onSelect: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
+    expanded: Boolean,
+) {
+    var items by remember(collection.id) { mutableStateOf<List<BaseItemDto>>(emptyList()) }
+    var loading by remember(collection.id) { mutableStateOf(true) }
+    var error by remember(collection.id) { mutableStateOf<String?>(null) }
+    var selectedType by remember(collection.id) { mutableStateOf<BaseItemKind?>(null) }
+    var selectedGenre by remember(collection.id) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(collection.id) {
+        loading = true
+        error = null
+        runCatching {
+            withContext(Dispatchers.IO) {
+                api.itemsApi.getItems(
+                    parentId = collection.id,
+                    recursive = true,
+                    includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                    fields = ItemRepository.browseFields,
+                    imageTypeLimit = 1,
+                    limit = 500,
+                    sortBy = setOf(ItemSortBy.SORT_NAME),
+                ).content.items
+            }
+        }.onSuccess { items = it }
+            .onFailure { error = it.message ?: "Couldn't load this collection." }
+        loading = false
+    }
+
+    val genres = remember(items, selectedType) {
+        items
+            .filter { selectedType == null || it.type == selectedType }
+            .flatMap { it.genres.orEmpty() }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+    val visible = remember(items, selectedType, selectedGenre) {
+        items.filter { item ->
+            (selectedType == null || item.type == selectedType) &&
+                (selectedGenre == null || item.genres.orEmpty().any {
+                    it.equals(selectedGenre, ignoreCase = true)
+                })
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF05080C)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            VesperButton("‹ Back", onBack)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                BasicText(
+                    if (service) serviceDisplayName(collection.name) else collectionDisplayName(collection.name),
+                    style = TextStyle(color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 1,
+                )
+                BasicText(
+                    if (service) "Streaming service" else "${items.size} titles",
+                    style = TextStyle(color = Color(0xFF81909E), fontSize = 12.sp),
+                )
+            }
+        }
+
+        if (service && !loading && items.isNotEmpty()) {
+            LazyRow(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    GenreChip(
+                        label = "All",
+                        selected = selectedType == null,
+                        onClick = { selectedType = null },
+                    )
+                }
+                item {
+                    GenreChip(
+                        label = "Movies",
+                        selected = selectedType == BaseItemKind.MOVIE,
+                        onClick = {
+                            selectedType = if (selectedType == BaseItemKind.MOVIE) null else BaseItemKind.MOVIE
+                            selectedGenre = null
+                        },
+                    )
+                }
+                item {
+                    GenreChip(
+                        label = "TV Shows",
+                        selected = selectedType == BaseItemKind.SERIES,
+                        onClick = {
+                            selectedType = if (selectedType == BaseItemKind.SERIES) null else BaseItemKind.SERIES
+                            selectedGenre = null
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
+        if (genres.isNotEmpty()) {
+            LazyRow(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    GenreChip(
+                        label = "All genres",
+                        selected = selectedGenre == null,
+                        onClick = { selectedGenre = null },
+                    )
+                }
+                items(genres, key = { it }) { genre ->
+                    GenreChip(
+                        label = genre,
+                        selected = selectedGenre == genre,
+                        onClick = { selectedGenre = if (selectedGenre == genre) null else genre },
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
+        when {
+            loading -> BasicText(
+                "Loading…",
+                style = TextStyle(color = Color(0xFF95A2AF), fontSize = 15.sp),
+                modifier = Modifier.padding(20.dp),
+            )
+            error != null -> BasicText(
+                error.orEmpty(),
+                style = TextStyle(color = Color(0xFFFFB7BE), fontSize = 14.sp),
+                modifier = Modifier.padding(20.dp),
+            )
+            visible.isEmpty() -> BasicText(
+                "Nothing matched this view.",
+                style = TextStyle(color = Color(0xFF95A2AF), fontSize = 15.sp),
+                modifier = Modifier.padding(20.dp),
+            )
+            else -> LazyVerticalGrid(
+                columns = GridCells.Fixed(if (expanded) 5 else 3),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 4.dp,
+                    bottom = 24.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                gridItems(visible, key = { it.id }) { item ->
+                    GridMediaCard(item, api, onSelect, onToggleFavorite)
+                }
+            }
         }
     }
 }
