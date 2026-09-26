@@ -1,0 +1,358 @@
+package org.jellyfin.androidtv.ui.mobile
+
+import android.os.Bundle
+import android.view.WindowManager
+import android.widget.ImageView
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.jellyfin.androidtv.data.repository.ItemRepository
+import org.jellyfin.androidtv.ui.player.base.PlayerSubtitles
+import org.jellyfin.androidtv.ui.player.base.PlayerSurface
+import org.jellyfin.androidtv.ui.playback.rewrite.RewriteMediaManager
+import org.jellyfin.playback.core.PlaybackManager
+import org.jellyfin.playback.core.model.PlayState
+import org.jellyfin.playback.core.queue.queue
+import org.jellyfin.sdk.api.client.ApiClient
+import org.jellyfin.sdk.api.client.extensions.tvShowsApi
+import org.jellyfin.sdk.api.client.extensions.userLibraryApi
+import org.jellyfin.sdk.model.api.BaseItemDto
+import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.extensions.ticks
+import org.koin.android.ext.android.inject
+import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
+
+class MobilePlayerActivity : FragmentActivity() {
+    companion object {
+        const val EXTRA_ITEM_ID = "item_id"
+    }
+
+    private val api by inject<ApiClient>()
+    private val playbackManager by inject<PlaybackManager>()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        val itemId = intent.getStringExtra(EXTRA_ITEM_ID)?.let(UUID::fromString)
+        if (itemId == null) {
+            finish()
+            return
+        }
+
+        setContent {
+            MobilePlayer(
+                playbackManager = playbackManager,
+                onClose = ::closePlayer,
+            )
+        }
+
+        lifecycleScope.launch {
+            prepare(itemId)
+        }
+    }
+
+    private suspend fun prepare(itemId: UUID) {
+        val item = withContext(Dispatchers.IO) {
+            api.userLibraryApi.getItem(itemId).content
+        }
+
+        val items = when (item.type) {
+            BaseItemKind.SERIES -> withContext(Dispatchers.IO) {
+                api.tvShowsApi.getEpisodes(
+                    seriesId = item.id,
+                    isMissing = false,
+                    fields = ItemRepository.itemFields,
+                    limit = 100,
+                ).content.items
+            }
+            BaseItemKind.SEASON -> withContext(Dispatchers.IO) {
+                api.tvShowsApi.getEpisodes(
+                    seriesId = requireNotNull(item.seriesId),
+                    seasonId = item.id,
+                    isMissing = false,
+                    fields = ItemRepository.itemFields,
+                    limit = 100,
+                ).content.items
+            }
+            else -> listOf(item)
+        }
+
+        if (items.isEmpty()) {
+            finish()
+            return
+        }
+
+        val selected = when (item.type) {
+            BaseItemKind.SERIES, BaseItemKind.SEASON ->
+                items.firstOrNull { it.userData?.played != true } ?: items.first()
+            else -> item
+        }
+        val startIndex = items.indexOfFirst { it.id == selected.id }.coerceAtLeast(0)
+        val resume = selected.userData?.playbackPositionTicks?.ticks
+
+        playbackManager.state.stop()
+        playbackManager.queue.clear()
+        playbackManager.queue.addSupplier(
+            RewriteMediaManager.BaseItemQueueSupplier(api, items, false)
+        )
+        playbackManager.queue.setIndex(startIndex)
+
+        if (resume != null && resume.inWholeMilliseconds > 0) {
+            playbackManager.state.seek(resume)
+        }
+        playbackManager.state.play()
+    }
+
+    private fun closePlayer() {
+        playbackManager.state.stop()
+        finish()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!isFinishing) playbackManager.state.pause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (playbackManager.state.playState.value == PlayState.PAUSED) {
+            playbackManager.state.unpause()
+        }
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) playbackManager.state.stop()
+        super.onDestroy()
+    }
+}
+
+@Composable
+private fun MobilePlayer(
+    playbackManager: PlaybackManager,
+    onClose: () -> Unit,
+) {
+    var controlsVisible by remember { mutableStateOf(true) }
+    var positionMs by remember { mutableLongStateOf(0L) }
+    var durationMs by remember { mutableLongStateOf(0L) }
+    var seekWidth by remember { mutableStateOf(1) }
+    val playState by playbackManager.state.playState.collectAsState()
+
+    BackHandler(onBack = onClose)
+
+    LaunchedEffect(playbackManager) {
+        while (true) {
+            val info = playbackManager.state.positionInfo
+            positionMs = info.active.inWholeMilliseconds.coerceAtLeast(0)
+            durationMs = info.duration.inWholeMilliseconds.coerceAtLeast(0)
+            delay(500)
+        }
+    }
+
+    LaunchedEffect(controlsVisible, playState) {
+        if (controlsVisible && playState == PlayState.PLAYING) {
+            delay(5000)
+            controlsVisible = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { controlsVisible = !controlsVisible })
+            },
+    ) {
+        PlayerSurface(
+            playbackManager = playbackManager,
+            modifier = Modifier.fillMaxSize().align(Alignment.Center),
+        )
+
+        PlayerSubtitles(
+            playbackManager = playbackManager,
+            modifier = Modifier.fillMaxSize().align(Alignment.Center),
+        )
+
+        if (controlsVisible) {
+            Box(
+                Modifier.fillMaxSize().background(Color(0x55000000))
+            )
+
+            MobileCloseButton(
+                onClick = onClose,
+                modifier = Modifier.align(Alignment.TopStart).padding(18.dp),
+            )
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color(0xCC05080C))
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PlayerButton("↶ 10", { playbackManager.state.rewind(10_000.milliseconds) })
+                    Spacer(Modifier.width(18.dp))
+                    PlayerButton(
+                        if (playState == PlayState.PLAYING) "❚❚" else "▶",
+                        {
+                            when (playState) {
+                                PlayState.PLAYING -> playbackManager.state.pause()
+                                PlayState.PAUSED -> playbackManager.state.unpause()
+                                PlayState.STOPPED, PlayState.ERROR -> playbackManager.state.play()
+                            }
+                        },
+                        primary = true,
+                    )
+                    Spacer(Modifier.width(18.dp))
+                    PlayerButton("30 ↷", { playbackManager.state.fastForward(30_000.milliseconds) })
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicText(
+                        formatTime(positionMs),
+                        style = TextStyle(color = Color.White, fontSize = 12.sp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(18.dp)
+                            .onSizeChanged { seekWidth = it.width.coerceAtLeast(1) }
+                            .pointerInput(durationMs, seekWidth) {
+                                detectTapGestures { offset: Offset ->
+                                    if (durationMs > 0) {
+                                        val fraction = (offset.x / seekWidth.toFloat()).coerceIn(0f, 1f)
+                                        playbackManager.state.seek((durationMs * fraction).toLong().milliseconds)
+                                        controlsVisible = true
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Box(
+                            Modifier.fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0x55FFFFFF))
+                        )
+                        val fraction = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
+                        Box(
+                            Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f))
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0xFF8BD8FF))
+                        )
+                    }
+
+                    Spacer(Modifier.width(10.dp))
+                    BasicText(
+                        formatTime(durationMs),
+                        style = TextStyle(color = Color.White, fontSize = 12.sp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerButton(
+    label: String,
+    onClick: () -> Unit,
+    primary: Boolean = false,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(if (primary) Color.White else Color(0x33FFFFFF))
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (primary) 24.dp else 17.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(
+                color = if (primary) Color.Black else Color.White,
+                fontSize = if (primary) 18.sp else 14.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun MobileCloseButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0x99000000))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 10.dp),
+    ) {
+        BasicText("✕", style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold))
+    }
+}
+
+private fun formatTime(ms: Long): String {
+    val totalSeconds = (ms / 1000).coerceAtLeast(0)
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds)
+    else "%d:%02d".format(minutes, seconds)
+}
