@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,17 +51,26 @@ import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.data.repository.ItemRepository
 import org.jellyfin.androidtv.ui.player.base.PlayerSubtitles
 import org.jellyfin.androidtv.ui.player.base.PlayerSurface
+import org.jellyfin.androidtv.ui.composable.rememberQueueEntry
+import org.jellyfin.androidtv.ui.playback.segment.MediaSegmentRepository
 import org.jellyfin.androidtv.ui.playback.rewrite.RewriteMediaManager
 import org.jellyfin.playback.core.PlaybackManager
 import org.jellyfin.playback.core.model.PlayState
 import org.jellyfin.playback.core.queue.queue
+import org.jellyfin.playback.jellyfin.queue.baseItem
+import org.jellyfin.playback.jellyfin.queue.baseItemFlow
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.MediaSegmentDto
+import org.jellyfin.sdk.model.api.MediaSegmentType
 import org.jellyfin.sdk.model.extensions.ticks
+import org.jellyfin.androidtv.util.sdk.start
+import org.jellyfin.androidtv.util.sdk.end
 import org.koin.android.ext.android.inject
+import org.koin.compose.koinInject
 import java.util.UUID
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -182,9 +192,25 @@ private fun MobilePlayer(
     var scrubMs by remember { mutableLongStateOf(0L) }
     val playState by playbackManager.state.playState.collectAsState()
     val videoSize by playbackManager.state.videoSize.collectAsState()
+    val queueIndex by playbackManager.queue.entryIndex.collectAsState()
+    val queueEntry by rememberQueueEntry(playbackManager)
+    val currentItem = queueEntry?.run { baseItemFlow.collectAsState(baseItem).value }
+    val mediaSegmentRepository = koinInject<MediaSegmentRepository>()
+    val scope = rememberCoroutineScope()
+    var segments by remember { mutableStateOf<List<MediaSegmentDto>>(emptyList()) }
+    val hasNext = queueIndex >= 0 && queueIndex < playbackManager.queue.estimatedSize - 1
+    val currentIntro = segments.firstOrNull { segment ->
+        segment.type == MediaSegmentType.INTRO &&
+            positionMs >= segment.start.inWholeMilliseconds &&
+            positionMs < segment.end.inWholeMilliseconds
+    }
     val aspectRatio = videoSize.aspectRatio.takeIf { !it.isNaN() && it > 0f } ?: (16f / 9f)
 
     BackHandler(onBack = onClose)
+
+    LaunchedEffect(currentItem?.id) {
+        segments = currentItem?.let { mediaSegmentRepository.getSegmentsForItem(it) }.orEmpty()
+    }
 
     LaunchedEffect(playbackManager) {
         while (true) {
@@ -246,6 +272,20 @@ private fun MobilePlayer(
                 modifier = Modifier.align(Alignment.TopStart).padding(18.dp),
             )
 
+            if (currentIntro != null) {
+                PlayerButton(
+                    "Skip Intro",
+                    {
+                        playbackManager.state.seek(currentIntro.end)
+                        controlsVisible = true
+                    },
+                    primary = true,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 18.dp, bottom = 120.dp),
+                )
+            }
+
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -258,8 +298,17 @@ private fun MobilePlayer(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PlayerButton("-10 sec", { playbackManager.state.rewind(10_000.milliseconds) })
-                    Spacer(Modifier.width(18.dp))
+                    PlayerButton(
+                        "↺ Restart",
+                        {
+                            playbackManager.state.seek(0.milliseconds)
+                            if (playState != PlayState.PLAYING) playbackManager.state.unpause()
+                            controlsVisible = true
+                        },
+                    )
+
+                    Spacer(Modifier.width(14.dp))
+
                     PlayerButton(
                         if (playState == PlayState.PLAYING) "❚❚" else "▶",
                         {
@@ -271,8 +320,20 @@ private fun MobilePlayer(
                         },
                         primary = true,
                     )
-                    Spacer(Modifier.width(18.dp))
-                    PlayerButton("+30 sec", { playbackManager.state.fastForward(30_000.milliseconds) })
+
+                    if (hasNext) {
+                        Spacer(Modifier.width(14.dp))
+                        PlayerButton(
+                            "Next Episode ›",
+                            {
+                                scope.launch {
+                                    playbackManager.queue.next()
+                                    playbackManager.state.play()
+                                    controlsVisible = true
+                                }
+                            },
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -369,9 +430,10 @@ private fun PlayerButton(
     label: String,
     onClick: () -> Unit,
     primary: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(22.dp))
             .background(if (primary) Color.White else Color(0x33FFFFFF))
             .clickable(onClick = onClick)
