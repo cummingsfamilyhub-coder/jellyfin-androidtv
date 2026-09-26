@@ -27,8 +27,12 @@ class VesperCastManager(
     private val handler = Handler(Looper.getMainLooper())
     private var receiverReady = false
     private var pendingItem: BaseItemDto? = null
+    private var pendingStartPositionTicks: Long? = null
     private var lastRequestedItem: BaseItemDto? = null
+    private var lastRequestedStartPositionTicks: Long? = null
     private var compatibilityRetryCount = 0
+
+    var onRemotePlaybackStarted: (() -> Unit)? = null
 
     private val castContext: CastContext by lazy {
         CastContext.getSharedInstance(activity)
@@ -101,8 +105,9 @@ class VesperCastManager(
      * Returning true means Cast owns this play request, so callers must not
      * silently fall back to local playback while the receiver is starting.
      */
-    fun play(item: BaseItemDto): Boolean {
+    fun play(item: BaseItemDto, startPositionTicks: Long? = null): Boolean {
         lastRequestedItem = item
+        lastRequestedStartPositionTicks = startPositionTicks
         compatibilityRetryCount = 0
 
         val castSession = castContext.sessionManager.currentCastSession
@@ -114,16 +119,38 @@ class VesperCastManager(
 
         if (castSession?.isConnected != true) {
             pendingItem = item
+            pendingStartPositionTicks = startPositionTicks
             return true
         }
 
         if (!receiverReady) {
             pendingItem = item
+            pendingStartPositionTicks = startPositionTicks
             warmReceiver(castSession)
             return true
         }
 
-        return sendPlay(castSession, item)
+        return sendPlay(castSession, item, startPositionTicks)
+    }
+
+    fun prepareHandoff(item: BaseItemDto, startPositionTicks: Long) {
+        lastRequestedItem = item
+        lastRequestedStartPositionTicks = startPositionTicks
+        compatibilityRetryCount = 0
+        pendingItem = item
+        pendingStartPositionTicks = startPositionTicks
+
+        castContext.sessionManager.currentCastSession
+            ?.takeIf { it.isConnected }
+            ?.let { session ->
+                if (receiverReady) {
+                    pendingItem = null
+                    pendingStartPositionTicks = null
+                    sendPlay(session, item, startPositionTicks)
+                } else {
+                    warmReceiver(session)
+                }
+            }
     }
 
     fun sendCommand(command: String, options: JSONObject = JSONObject()): Boolean {
@@ -169,14 +196,17 @@ class VesperCastManager(
 
             receiverReady = true
             val item = pendingItem ?: return@postDelayed
+            val startPositionTicks = pendingStartPositionTicks
             pendingItem = null
-            sendPlay(session, item)
+            pendingStartPositionTicks = null
+            sendPlay(session, item, startPositionTicks)
         }, RECEIVER_WARMUP_MS)
     }
 
     private fun sendPlay(
         castSession: CastSession,
         item: BaseItemDto,
+        startPositionTicks: Long? = null,
     ): Boolean {
         val currentSession = sessionRepository.currentSession.value
         val currentServer = serverRepository.currentServer.value
@@ -202,7 +232,7 @@ class VesperCastManager(
         val options = JSONObject()
             .put("items", JSONArray().put(itemStub))
 
-        val resumeTicks = item.userData?.playbackPositionTicks ?: 0L
+        val resumeTicks = startPositionTicks ?: item.userData?.playbackPositionTicks ?: 0L
         if (resumeTicks > 0L) {
             options.put("startPositionTicks", resumeTicks)
         }
@@ -275,13 +305,14 @@ class VesperCastManager(
                                         ?.takeIf { it.isConnected }
                                         ?: return@postDelayed
                                     receiverReady = true
-                                    sendPlay(activeSession, item)
+                                    sendPlay(activeSession, item, lastRequestedStartPositionTicks)
                                 }, COMPATIBILITY_RETRY_DELAY_MS)
                             }
                         } else {
                             showToast("Chromecast playback error: $detail")
                         }
                     }
+                    "playbackstart" -> onRemotePlaybackStarted?.invoke()
                     "error" -> showToast(
                         "Chromecast error: " + receiverMessage(message)
                     )
@@ -314,7 +345,11 @@ class VesperCastManager(
         }
 
         session.sendMessage(NAMESPACE, message).setResultCallback { result ->
-            if (!result.isSuccess && attemptsLeft > 1) {
+            if (result.isSuccess) {
+                return@setResultCallback
+            }
+
+            if (attemptsLeft > 1) {
                 receiverReady = false
                 handler.postDelayed({
                     sendIdentify(session)
@@ -377,6 +412,7 @@ class VesperCastManager(
         .put("receiverName", castSession.castDevice?.friendlyName.orEmpty())
 
     fun destroy() {
+        onRemotePlaybackStarted = null
         handler.removeCallbacksAndMessages(null)
         runCatching {
             castContext.sessionManager.currentCastSession
