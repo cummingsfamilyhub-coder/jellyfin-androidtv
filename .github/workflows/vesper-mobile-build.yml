@@ -45,13 +45,7 @@ jobs:
                               'base.archivesName.set("vesper-mobile-v${project.getVersionName()}")')
           build.write_text(text, encoding="utf-8")
 
-          icon_source = Path("app/vesper_icon.b64")
-          icon_dir = Path("app/src/main/res/drawable-nodpi")
-          icon_dir.mkdir(parents=True, exist_ok=True)
-          fallback_icon = Path("app/src/main/res/drawable/vesper_icon.xml")
-          if fallback_icon.exists():
-              fallback_icon.unlink()
-          (icon_dir / "vesper_icon.png").write_bytes(base64.b64decode(icon_source.read_text(encoding="utf-8")))
+          # Keep the checked-in Vesper vector for the shell validation build.
 
           strings = Path("app/src/main/res/values/strings.xml")
           text = strings.read_text(encoding="utf-8")
