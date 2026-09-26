@@ -72,9 +72,6 @@ import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.data.repository.ItemRepository
 import org.jellyfin.androidtv.ui.composable.AsyncImage
-import org.jellyfin.androidtv.ui.mobile.cast.VesperCastOptionsProvider
-import org.jellyfin.androidtv.ui.mobile.cast.VesperCastManager
-import org.jellyfin.androidtv.ui.mobile.cast.VesperCastButton
 import org.jellyfin.androidtv.util.apiclient.getUrl
 import org.jellyfin.androidtv.util.apiclient.itemImages
 import org.jellyfin.androidtv.util.apiclient.itemBackdropImages
@@ -101,7 +98,6 @@ class MobileMainActivity : FragmentActivity() {
     private val serverRepository by inject<ServerRepository>()
     private val userRepository by inject<UserRepository>()
     private val itemMutationRepository by inject<ItemMutationRepository>()
-    private lateinit var castManager: VesperCastManager
 
     private var state by mutableStateOf(MobileHomeState())
     private var popularity by mutableStateOf(PopularityState())
@@ -128,18 +124,6 @@ class MobileMainActivity : FragmentActivity() {
                     ?: PopularityScope.GLOBAL.name
             )
         }.getOrDefault(PopularityScope.GLOBAL)
-
-        val castReceiverId = userRepository.currentUser.value
-            ?.configuration
-            ?.castReceiverId
-        VesperCastOptionsProvider.setReceiverApplicationId(castReceiverId)
-        castManager = VesperCastManager(
-            activity = this,
-            api = api,
-            sessionRepository = sessionRepository,
-            serverRepository = serverRepository,
-        )
-        castManager.updateReceiverApplicationId(castReceiverId)
 
         setContent {
             VesperMobile(
@@ -896,11 +880,6 @@ private fun MobileTopBar(
                 style = TextStyle(color = Color(0xFF8492A0), fontSize = 12.sp),
             )
         }
-
-        VesperCastButton(
-            modifier = Modifier.size(40.dp),
-        )
-        Spacer(Modifier.width(8.dp))
 
         Box {
             Box(
