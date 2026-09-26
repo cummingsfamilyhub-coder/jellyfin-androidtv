@@ -1,6 +1,9 @@
 package org.jellyfin.androidtv.ui.mobile
 
 import android.content.Intent
+import android.widget.EditText
+import android.text.InputType
+import android.app.AlertDialog
 import android.os.Bundle
 import android.widget.ImageView
 import androidx.activity.compose.BackHandler
@@ -60,6 +63,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.data.repository.ItemRepository
@@ -78,15 +82,23 @@ import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.SortOrder
 import org.koin.android.ext.android.inject
+import java.nio.charset.StandardCharsets
+import java.net.URLEncoder
+import java.net.URL
+import java.net.HttpURLConnection
+import org.json.JSONArray
 
 class MobileMainActivity : FragmentActivity() {
     private val api by inject<ApiClient>()
     private val sessionRepository by inject<SessionRepository>()
+    private val serverRepository by inject<ServerRepository>()
     private val userRepository by inject<UserRepository>()
     private val itemMutationRepository by inject<ItemMutationRepository>()
 
     private var state by mutableStateOf(MobileHomeState())
+    private var popularity by mutableStateOf(PopularityState())
     private var selected by mutableStateOf<BaseItemDto?>(null)
+    private var tmdbApiKey by mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,9 +109,15 @@ class MobileMainActivity : FragmentActivity() {
             return
         }
 
+        tmdbApiKey = getSharedPreferences("vesper", MODE_PRIVATE)
+            .getString("tmdb_api_key", "")
+            .orEmpty()
+
         setContent {
             VesperMobile(
                 state = state,
+                popularity = popularity,
+                tmdbConfigured = tmdbApiKey.isNotBlank(),
                 selected = selected,
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
                 api = api,
@@ -139,7 +157,8 @@ class MobileMainActivity : FragmentActivity() {
                             filters = setOf(ItemFilter.IS_FAVORITE),
                             imageTypeLimit = 1,
                             limit = 500,
-                            sortBy = setOf(ItemSortBy.SORT_NAME),
+                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
+                            sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
                     val movies = async {
@@ -149,7 +168,7 @@ class MobileMainActivity : FragmentActivity() {
                             recursive = true,
                             imageTypeLimit = 1,
                             limit = 500,
-                            sortBy = setOf(ItemSortBy.DATE_CREATED),
+                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
@@ -160,7 +179,7 @@ class MobileMainActivity : FragmentActivity() {
                             recursive = true,
                             imageTypeLimit = 1,
                             limit = 500,
-                            sortBy = setOf(ItemSortBy.DATE_CREATED),
+                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
@@ -192,8 +211,105 @@ class MobileMainActivity : FragmentActivity() {
             }.getOrElse { error ->
                 MobileHomeState(error = error.message ?: error::class.java.simpleName)
             }
+            if (state.error == null) loadPopularity()
         }
     }
+
+    private fun loadPopularity() {
+        val session = sessionRepository.currentSession.value
+        val server = serverRepository.currentServer.value
+        val key = tmdbApiKey.trim()
+
+        lifecycleScope.launch {
+            popularity = withContext(Dispatchers.IO) {
+                val localMovies = if (session != null && server != null) {
+                    fetchPlaybackPopularity(
+                        server.address,
+                        session.accessToken,
+                        "MoviesReport",
+                    )
+                } else emptyMap()
+                val localShows = if (session != null && server != null) {
+                    fetchPlaybackPopularity(
+                        server.address,
+                        session.accessToken,
+                        "GetTvShowsReport",
+                    )
+                } else emptyMap()
+
+                val globalMovies = if (key.isNotBlank()) fetchTmdbTrending("movie", key) else emptyMap()
+                val globalShows = if (key.isNotBlank()) fetchTmdbTrending("tv", key) else emptyMap()
+
+                PopularityState(
+                    localMovies = localMovies,
+                    localShows = localShows,
+                    householdLocalAvailable = localMovies.isNotEmpty() || localShows.isNotEmpty(),
+                    globalMovies = globalMovies,
+                    globalShows = globalShows,
+                    globalAvailable = globalMovies.isNotEmpty() || globalShows.isNotEmpty(),
+                )
+            }
+        }
+    }
+
+    private fun fetchPlaybackPopularity(
+        serverAddress: String,
+        token: String,
+        endpoint: String,
+    ): Map<String, Int> = runCatching {
+        val url = URL("${serverAddress.trimEnd('/')}/user_usage_stats/$endpoint?days=30")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 5000
+            readTimeout = 10000
+            setRequestProperty("X-Emby-Token", token)
+            setRequestProperty("Accept", "application/json")
+        }
+        if (connection.responseCode !in 200..299) {
+            connection.disconnect()
+            return@runCatching emptyMap()
+        }
+
+        val body = connection.inputStream.bufferedReader().use { it.readText() }
+        connection.disconnect()
+        val array = JSONArray(body)
+        buildMap {
+            for (index in 0 until array.length()) {
+                val row = array.optJSONObject(index) ?: continue
+                val label = row.optString("label").trim()
+                val count = row.optInt("count", 0)
+                if (label.isNotBlank()) put(label.lowercase(), count)
+            }
+        }
+    }.getOrDefault(emptyMap())
+
+    private fun fetchTmdbTrending(
+        mediaType: String,
+        apiKey: String,
+    ): Map<Int, Int> = runCatching {
+        val encoded = URLEncoder.encode(apiKey, StandardCharsets.UTF_8.name())
+        val url = URL("https://api.themoviedb.org/3/trending/$mediaType/week?api_key=$encoded")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 5000
+            readTimeout = 10000
+            setRequestProperty("Accept", "application/json")
+        }
+        if (connection.responseCode !in 200..299) {
+            connection.disconnect()
+            return@runCatching emptyMap()
+        }
+
+        val body = connection.inputStream.bufferedReader().use { it.readText() }
+        connection.disconnect()
+        val results = org.json.JSONObject(body).optJSONArray("results") ?: JSONArray()
+        buildMap {
+            for (index in 0 until results.length()) {
+                val id = results.optJSONObject(index)?.optInt("id", -1) ?: -1
+                if (id > 0) put(id, index)
+            }
+        }
+    }.getOrDefault(emptyMap())
 
     private fun toggleFavorite(item: BaseItemDto) {
         lifecycleScope.launch {
@@ -234,7 +350,30 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun openSettings() {
-        startActivity(Intent(this, PreferencesActivity::class.java))
+        val input = EditText(this).apply {
+            setText(tmdbApiKey)
+            hint = "TMDb v3 API key"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSelectAllOnFocus(false)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Vesper settings")
+            .setMessage("TMDb powers Global popularity. The key is stored only on this device.")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                tmdbApiKey = input.text?.toString()?.trim().orEmpty()
+                getSharedPreferences("vesper", MODE_PRIVATE)
+                    .edit()
+                    .putString("tmdb_api_key", tmdbApiKey)
+                    .apply()
+                loadPopularity()
+            }
+            .setNeutralButton("Jellyfin settings") { _, _ ->
+                startActivity(Intent(this, PreferencesActivity::class.java))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun playItem(item: BaseItemDto) {
@@ -243,6 +382,20 @@ class MobileMainActivity : FragmentActivity() {
                 .putExtra(MobilePlayerActivity.EXTRA_ITEM_ID, item.id.toString())
         )
     }
+}
+
+private data class PopularityState(
+    val localMovies: Map<String, Int> = emptyMap(),
+    val localShows: Map<String, Int> = emptyMap(),
+    val householdLocalAvailable: Boolean = false,
+    val globalMovies: Map<Int, Int> = emptyMap(),
+    val globalShows: Map<Int, Int> = emptyMap(),
+    val globalAvailable: Boolean = false,
+)
+
+private enum class PopularityMode {
+    LOCAL,
+    GLOBAL,
 }
 
 private data class MobileHomeState(
@@ -309,6 +462,8 @@ private enum class MobileTab(val label: String, val icon: String) {
 @Composable
 private fun VesperMobile(
     state: MobileHomeState,
+    popularity: PopularityState,
+    tmdbConfigured: Boolean,
     selected: BaseItemDto?,
     userName: String,
     api: ApiClient,
@@ -367,6 +522,8 @@ private fun VesperMobile(
                     api = api,
                     onSelect = onSelect,
                     onToggleFavorite = onToggleFavorite,
+                    popularity = popularity,
+                    tmdbConfigured = tmdbConfigured,
                     expanded = expanded,
                 )
                 MobileTab.TV -> LibraryBrowse(
@@ -375,6 +532,8 @@ private fun VesperMobile(
                     api = api,
                     onSelect = onSelect,
                     onToggleFavorite = onToggleFavorite,
+                    popularity = popularity,
+                    tmdbConfigured = tmdbConfigured,
                     expanded = expanded,
                 )
                 MobileTab.MYV -> LibraryBrowse(
@@ -383,6 +542,8 @@ private fun VesperMobile(
                     api = api,
                     onSelect = onSelect,
                     onToggleFavorite = onToggleFavorite,
+                    popularity = popularity,
+                    tmdbConfigured = tmdbConfigured,
                     expanded = expanded,
                 )
                 MobileTab.SEARCH -> SearchBrowse(
@@ -1124,6 +1285,8 @@ private fun LibraryBrowse(
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
+    popularity: PopularityState,
+    tmdbConfigured: Boolean,
     expanded: Boolean,
 ) {
     val genres = remember(media) {
@@ -1135,12 +1298,56 @@ private fun LibraryBrowse(
             .sorted()
     }
     var selectedGenre by remember(title, media) { mutableStateOf<String?>(null) }
-    val visibleMedia = remember(media, selectedGenre) {
+    var popularityMode by remember(title) { mutableStateOf(PopularityMode.LOCAL) }
+
+    fun BaseItemDto.tmdbId(): Int? =
+        providerIds
+            ?.entries
+            ?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }
+            ?.value
+            ?.toIntOrNull()
+
+    fun localScore(item: BaseItemDto): Int {
+        val name = item.name?.trim()?.lowercase().orEmpty()
+        return when (item.type) {
+            BaseItemKind.MOVIE -> popularity.localMovies[name] ?: -1
+            BaseItemKind.SERIES -> popularity.localShows[name] ?: -1
+            else -> -1
+        }
+    }
+
+    fun globalRank(item: BaseItemDto): Int {
+        val id = item.tmdbId() ?: return Int.MAX_VALUE
+        return when (item.type) {
+            BaseItemKind.MOVIE -> popularity.globalMovies[id] ?: Int.MAX_VALUE
+            BaseItemKind.SERIES -> popularity.globalShows[id] ?: Int.MAX_VALUE
+            else -> Int.MAX_VALUE
+        }
+    }
+
+    val filtered = remember(media, selectedGenre) {
         selectedGenre?.let { genre ->
             media.filter { item ->
                 item.genres.orEmpty().any { it.equals(genre, ignoreCase = true) }
             }
         } ?: media
+    }
+
+    val visibleMedia = remember(filtered, popularityMode, popularity) {
+        when (popularityMode) {
+            PopularityMode.LOCAL -> {
+                if (popularity.householdLocalAvailable) {
+                    filtered.sortedWith(
+                        compareByDescending<BaseItemDto> { localScore(it) }
+                            .thenBy { it.name.orEmpty().lowercase() }
+                    )
+                } else filtered
+            }
+            PopularityMode.GLOBAL -> filtered.sortedWith(
+                compareBy<BaseItemDto> { globalRank(it) }
+                    .thenBy { it.name.orEmpty().lowercase() }
+            )
+        }
     }
 
     Column(
@@ -1155,10 +1362,44 @@ private fun LibraryBrowse(
             )
             BasicText(
                 if (selectedGenre == null) "${media.size} items"
-                else "${visibleMedia.size} • ${selectedGenre}",
+                else "${visibleMedia.size} • $selectedGenre",
                 style = TextStyle(color = Color(0xFF81909E), fontSize = 13.sp),
             )
         }
+
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PopularityChip(
+                label = "Local",
+                selected = popularityMode == PopularityMode.LOCAL,
+                onClick = { popularityMode = PopularityMode.LOCAL },
+            )
+            PopularityChip(
+                label = "Global",
+                selected = popularityMode == PopularityMode.GLOBAL,
+                onClick = { popularityMode = PopularityMode.GLOBAL },
+            )
+        }
+
+        val popularityNote = when {
+            popularityMode == PopularityMode.LOCAL && popularity.householdLocalAvailable ->
+                "Vesper users • last 30 days"
+            popularityMode == PopularityMode.LOCAL ->
+                "Active profile popularity • install Playback Reporting for household ranking"
+            popularityMode == PopularityMode.GLOBAL && popularity.globalAvailable ->
+                "TMDb trending • this week"
+            popularityMode == PopularityMode.GLOBAL && !tmdbConfigured ->
+                "Add your TMDb API key in Home → profile → Settings"
+            else ->
+                "Couldn't load TMDb trending right now"
+        }
+        BasicText(
+            popularityNote,
+            style = TextStyle(color = Color(0xFF6F7E8C), fontSize = 11.sp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+        )
 
         if (genres.isNotEmpty()) {
             LazyRow(
@@ -1211,6 +1452,30 @@ private fun LibraryBrowse(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PopularityChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) Color(0xFFBDEBFF) else Color(0xFF101821))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(
+                color = if (selected) Color(0xFF071017) else Color(0xFFD2DAE2),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
     }
 }
 
