@@ -48,7 +48,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +72,6 @@ import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.data.repository.ItemRepository
 import org.jellyfin.androidtv.ui.composable.AsyncImage
-import org.jellyfin.androidtv.ui.mobile.cast.CastPlaybackState
 import org.jellyfin.androidtv.ui.mobile.cast.VesperCastOptionsProvider
 import org.jellyfin.androidtv.ui.mobile.cast.VesperCastManager
 import org.jellyfin.androidtv.ui.mobile.cast.VesperCastButton
@@ -144,8 +142,6 @@ class MobileMainActivity : FragmentActivity() {
         castManager.updateReceiverApplicationId(castReceiverId)
 
         setContent {
-            val castPlayback by VesperCastManager.playbackState.collectAsState()
-
             VesperMobile(
                 state = state,
                 popularity = popularity,
@@ -154,12 +150,6 @@ class MobileMainActivity : FragmentActivity() {
                 selected = selected,
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
                 api = api,
-                castPlayback = castPlayback,
-                onCastTogglePlayback = { castManager.togglePlayback() },
-                onCastSeekBack = { castManager.seekBy(-10) },
-                onCastSeekForward = { castManager.seekBy(30) },
-                onCastNext = { castManager.nextTrack() },
-                onCastStop = { castManager.stopRemotePlayback() },
                 onSelect = { selected = it },
                 onBack = { selected = null },
                 onRetry = ::loadHome,
@@ -171,13 +161,6 @@ class MobileMainActivity : FragmentActivity() {
         }
 
         loadHome()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (::castManager.isInitialized) {
-            castManager.refreshSession()
-        }
     }
 
     private fun loadHome() {
@@ -257,24 +240,7 @@ class MobileMainActivity : FragmentActivity() {
             }.getOrElse { error ->
                 MobileHomeState(error = error.message ?: error::class.java.simpleName)
             }
-            if (state.error == null) {
-                loadServiceLogos()
-                loadPopularity()
-            }
-        }
-    }
-
-    private fun loadServiceLogos() {
-        val key = tmdbApiKey.trim()
-        if (key.isBlank()) return
-
-        lifecycleScope.launch {
-            val logos = withContext(Dispatchers.IO) {
-                fetchTmdbProviderLogos(key)
-            }
-            if (logos.isNotEmpty()) {
-                state = state.copy(serviceLogos = logos)
-            }
+            if (state.error == null) loadPopularity()
         }
     }
 
@@ -374,42 +340,6 @@ class MobileMainActivity : FragmentActivity() {
                 for (index in 0 until results.length()) {
                     val id = results.optJSONObject(index)?.optInt("id", -1) ?: -1
                     if (id > 0 && !containsKey(id)) put(id, rank++)
-                }
-            }
-        }
-    }.getOrDefault(emptyMap())
-
-    private fun fetchTmdbProviderLogos(apiKey: String): Map<String, String> = runCatching {
-        val encoded = URLEncoder.encode(apiKey, StandardCharsets.UTF_8.name())
-        buildMap {
-            listOf("movie", "tv").forEach { mediaType ->
-                val url = URL(
-                    "https://api.themoviedb.org/3/watch/providers/$mediaType?api_key=$encoded&watch_region=GB"
-                )
-                val connection = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 5000
-                    readTimeout = 10000
-                    setRequestProperty("Accept", "application/json")
-                }
-                if (connection.responseCode !in 200..299) {
-                    connection.disconnect()
-                    return@forEach
-                }
-
-                val body = connection.inputStream.bufferedReader().use { it.readText() }
-                connection.disconnect()
-                val results = org.json.JSONObject(body).optJSONArray("results") ?: JSONArray()
-                for (index in 0 until results.length()) {
-                    val provider = results.optJSONObject(index) ?: continue
-                    val name = provider.optString("provider_name").trim()
-                    val logoPath = provider.optString("logo_path").trim()
-                    if (name.isNotBlank() && logoPath.isNotBlank()) {
-                        put(
-                            name.lowercase(),
-                            "https://image.tmdb.org/t/p/w300$logoPath",
-                        )
-                    }
                 }
             }
         }
@@ -646,7 +576,6 @@ private data class MobileHomeState(
     val movies: List<BaseItemDto> = emptyList(),
     val shows: List<BaseItemDto> = emptyList(),
     val services: List<BaseItemDto> = emptyList(),
-    val serviceLogos: Map<String, String> = emptyMap(),
     val collections: List<BaseItemDto> = emptyList(),
 )
 
@@ -687,36 +616,25 @@ private fun serviceDisplayName(name: String?): String =
         .replace(Regex("^\\s*streaming:\\s*", RegexOption.IGNORE_CASE), "")
         .ifBlank { "Streaming service" }
 
-private fun serviceLogoUrl(
-    name: String?,
-    logos: Map<String, String>,
-): String? {
+private fun serviceLogoUrl(name: String?): String? {
     val normalized = serviceDisplayName(name).trim().lowercase()
-    val candidates = when {
-        normalized.contains("netflix") -> listOf("netflix")
-        normalized.contains("disney") -> listOf("disney plus", "disney+")
+    val path = when {
+        normalized.contains("netflix") -> "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg"
+        normalized.contains("disney") -> "/97yvRBw1GzX7fXprcF80er19ot.jpg"
         normalized.contains("amazon") || normalized.contains("prime") ->
-            listOf("amazon prime video", "prime video")
-        normalized.contains("apple") -> listOf("apple tv plus", "apple tv+", "apple tv")
-        normalized.contains("paramount") -> listOf("paramount plus", "paramount+")
-        normalized == "max" || normalized.contains("hbo") -> listOf("hbo max", "max")
-        normalized.startsWith("now") -> listOf("now", "now tv")
-        normalized.contains("iplayer") -> listOf("bbc iplayer")
-        normalized.contains("itvx") -> listOf("itvx")
-        normalized.contains("peacock") -> listOf("peacock")
-        normalized.contains("hulu") -> listOf("hulu")
-        else -> listOf(normalized)
+            "/pvske1MyAoymrs5bguRfVqYiM9a.jpg"
+        normalized.contains("apple") -> "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg"
+        normalized == "max" || normalized.contains("hbo") ->
+            "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg"
+        normalized.contains("paramount") -> "/fi83B1oztoS47xxcemFd8zbYD6z.jpg"
+        normalized.contains("iplayer") -> "/nc8Tpsr8SqCbsTUogPDD06gGzB3.jpg"
+        normalized.contains("itvx") -> "/1LuvKw01c2KQCt6DqgAgR06H2pT.jpg"
+        normalized.startsWith("now") -> "/y7mZSw1FV99yfawxOISBQTvtJxM.jpg"
+        normalized.contains("hulu") -> "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg"
+        normalized.contains("peacock") -> "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg"
+        else -> null
     }
-
-    candidates.forEach { candidate ->
-        logos[candidate]?.let { return it }
-    }
-
-    return logos.entries
-        .firstOrNull { (provider, _) ->
-            provider.contains(normalized) || normalized.contains(provider)
-        }
-        ?.value
+    return path?.let { "https://image.tmdb.org/t/p/w300$it" }
 }
 
 private fun collectionDisplayName(name: String?): String =
@@ -741,12 +659,6 @@ private fun VesperMobile(
     selected: BaseItemDto?,
     userName: String,
     api: ApiClient,
-    castPlayback: CastPlaybackState,
-    onCastTogglePlayback: () -> Unit,
-    onCastSeekBack: () -> Unit,
-    onCastSeekForward: () -> Unit,
-    onCastNext: () -> Unit,
-    onCastStop: () -> Unit,
     onSelect: (BaseItemDto) -> Unit,
     onBack: () -> Unit,
     onRetry: () -> Unit,
@@ -847,23 +759,6 @@ private fun VesperMobile(
             )
         }
 
-        if (castPlayback.connected && castPlayback.active) {
-            CastMiniController(
-                state = castPlayback,
-                onTogglePlayback = onCastTogglePlayback,
-                onSeekBack = onCastSeekBack,
-                onSeekForward = onCastSeekForward,
-                onNext = onCastNext,
-                onStop = onCastStop,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(
-                        start = 10.dp,
-                        end = 10.dp,
-                        bottom = if (selected == null) 74.dp else 12.dp,
-                    ),
-            )
-        }
     }
 }
 
@@ -951,7 +846,6 @@ private fun MobileHome(
                     nameFormatter = { serviceDisplayName(it.name) },
                     showFavorite = false,
                     providerTiles = true,
-                    providerLogos = state.serviceLogos,
                 )
             }
             if (state.collections.isNotEmpty()) item {
@@ -1212,7 +1106,6 @@ private fun MediaRow(
     nameFormatter: (BaseItemDto) -> String = { it.name ?: "Untitled" },
     showFavorite: Boolean = true,
     providerTiles: Boolean = false,
-    providerLogos: Map<String, String> = emptyMap(),
 ) {
     Column(Modifier.padding(top = 14.dp)) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
@@ -1242,7 +1135,6 @@ private fun MediaRow(
                     nameFormatter = nameFormatter,
                     showFavorite = showFavorite,
                     providerTile = providerTiles,
-                    providerLogos = providerLogos,
                 )
             }
         }
@@ -1259,7 +1151,6 @@ private fun MediaCard(
     nameFormatter: (BaseItemDto) -> String = { it.name ?: "Untitled" },
     showFavorite: Boolean = true,
     providerTile: Boolean = false,
-    providerLogos: Map<String, String> = emptyMap(),
 ) {
     val w = if (landscape) 210.dp else 132.dp
     val h = if (landscape) 122.dp else 198.dp
@@ -1282,7 +1173,7 @@ private fun MediaCard(
             if (providerTile) {
                 ProviderWordmark(
                     name = serviceDisplayName(item.name),
-                    logoUrl = serviceLogoUrl(item.name, providerLogos),
+                    logoUrl = serviceLogoUrl(item.name),
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -1938,138 +1829,6 @@ private fun GridMediaCard(
             maxLines = 1,
         )
     }
-}
-
-@Composable
-private fun CastMiniController(
-    state: CastPlaybackState,
-    onTogglePlayback: () -> Unit,
-    onSeekBack: () -> Unit,
-    onSeekForward: () -> Unit,
-    onNext: () -> Unit,
-    onStop: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xF217222C))
-            .padding(horizontal = 14.dp, vertical = 11.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                BasicText(
-                    "Casting to ${state.deviceName.ifBlank { "Chromecast" }}",
-                    style = TextStyle(
-                        color = Color(0xFF8BD8FF),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    maxLines = 1,
-                )
-                BasicText(
-                    state.title.ifBlank { "Playing on TV" },
-                    style = TextStyle(
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    maxLines = 1,
-                )
-                if (state.seriesName.isNotBlank()) {
-                    BasicText(
-                        state.seriesName,
-                        style = TextStyle(color = Color(0xFF8D9AA7), fontSize = 10.sp),
-                        maxLines = 1,
-                    )
-                }
-            }
-
-            CastControlButton("−10", onSeekBack)
-            Spacer(Modifier.width(6.dp))
-            CastControlButton(if (state.isPaused) "▶" else "❚❚", onTogglePlayback, primary = true)
-            Spacer(Modifier.width(6.dp))
-            CastControlButton("+30", onSeekForward)
-            if (state.hasNext) {
-                Spacer(Modifier.width(6.dp))
-                CastControlButton("›|", onNext)
-            }
-            Spacer(Modifier.width(6.dp))
-            CastControlButton("■", onStop)
-        }
-
-        if (state.durationTicks > 0L) {
-            Spacer(Modifier.height(8.dp))
-            val progress = (
-                state.positionTicks.toFloat() / state.durationTicks.toFloat()
-            ).coerceIn(0f, 1f)
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color(0x44FFFFFF))
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(progress)
-                        .height(3.dp)
-                        .background(Color(0xFF8BD8FF))
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Row(Modifier.fillMaxWidth()) {
-                BasicText(
-                    formatCastTicks(state.positionTicks),
-                    style = TextStyle(color = Color(0xFF8D9AA7), fontSize = 9.sp),
-                )
-                Spacer(Modifier.weight(1f))
-                BasicText(
-                    formatCastTicks(state.durationTicks),
-                    style = TextStyle(color = Color(0xFF8D9AA7), fontSize = 9.sp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CastControlButton(
-    label: String,
-    onClick: () -> Unit,
-    primary: Boolean = false,
-) {
-    Box(
-        modifier = Modifier
-            .size(if (primary) 38.dp else 34.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (primary) Color.White else Color(0x22FFFFFF))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        BasicText(
-            label,
-            style = TextStyle(
-                color = if (primary) Color.Black else Color.White,
-                fontSize = if (label.length > 2) 10.sp else 14.sp,
-                fontWeight = FontWeight.Bold,
-            ),
-            maxLines = 1,
-        )
-    }
-}
-
-private fun formatCastTicks(ticks: Long): String {
-    val totalSeconds = (ticks / 10_000_000L).coerceAtLeast(0L)
-    val hours = totalSeconds / 3600L
-    val minutes = (totalSeconds % 3600L) / 60L
-    val seconds = totalSeconds % 60L
-    return if (hours > 0L) "%d:%02d:%02d".format(hours, minutes, seconds)
-    else "%d:%02d".format(minutes, seconds)
 }
 
 @Composable
