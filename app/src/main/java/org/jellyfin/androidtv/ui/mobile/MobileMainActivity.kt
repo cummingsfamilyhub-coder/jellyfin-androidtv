@@ -382,6 +382,11 @@ class MobileMainActivity : FragmentActivity() {
         finish()
     }
 
+    private fun encodeSeerrQueryValue(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+            .replace("+", "%20")
+            .replace("*", "%2A")
+
     private suspend fun searchSeerr(query: String): List<SeerrSearchResult> =
         withContext(Dispatchers.IO) {
             val baseUrl = seerrUrl.trim().trimEnd('/')
@@ -391,7 +396,7 @@ class MobileMainActivity : FragmentActivity() {
                 return@withContext emptyList()
             }
 
-            val encodedQuery = URLEncoder.encode(cleanQuery, StandardCharsets.UTF_8.name())
+            val encodedQuery = encodeSeerrQueryValue(cleanQuery)
             val url = URL("${baseUrl}/api/v1/search?query=${encodedQuery}&page=1")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
