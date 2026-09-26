@@ -343,7 +343,6 @@ private fun MobilePlayer(
                             {
                                 scope.launch {
                                     playbackManager.queue.next()
-                                    playbackManager.state.play()
                                     controlsVisible = true
                                 }
                             },
