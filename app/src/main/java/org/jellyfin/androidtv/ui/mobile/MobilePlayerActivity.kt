@@ -7,8 +7,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -176,16 +178,20 @@ private fun MobilePlayer(
     var positionMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var seekWidth by remember { mutableStateOf(1) }
+    var scrubbing by remember { mutableStateOf(false) }
+    var scrubMs by remember { mutableLongStateOf(0L) }
     val playState by playbackManager.state.playState.collectAsState()
+    val videoSize by playbackManager.state.videoSize.collectAsState()
+    val aspectRatio = videoSize.aspectRatio.takeIf { !it.isNaN() && it > 0f } ?: (16f / 9f)
 
     BackHandler(onBack = onClose)
 
     LaunchedEffect(playbackManager) {
         while (true) {
             val info = playbackManager.state.positionInfo
-            positionMs = info.active.inWholeMilliseconds.coerceAtLeast(0)
+            if (!scrubbing) positionMs = info.active.inWholeMilliseconds.coerceAtLeast(0)
             durationMs = info.duration.inWholeMilliseconds.coerceAtLeast(0)
-            delay(500)
+            delay(250)
         }
     }
 
@@ -201,17 +207,33 @@ private fun MobilePlayer(
             .fillMaxSize()
             .background(Color.Black)
             .pointerInput(Unit) {
-                detectTapGestures(onTap = { controlsVisible = !controlsVisible })
+                detectTapGestures(
+                    onTap = { controlsVisible = !controlsVisible },
+                    onDoubleTap = { offset ->
+                        if (offset.x < size.width / 2f) {
+                            playbackManager.state.rewind(10_000.milliseconds)
+                        } else {
+                            playbackManager.state.fastForward(30_000.milliseconds)
+                        }
+                        controlsVisible = true
+                    },
+                )
             },
     ) {
         PlayerSurface(
             playbackManager = playbackManager,
-            modifier = Modifier.fillMaxSize().align(Alignment.Center),
+            modifier = Modifier
+                .aspectRatio(aspectRatio, videoSize.height < videoSize.width)
+                .fillMaxSize()
+                .align(Alignment.Center),
         )
 
         PlayerSubtitles(
             playbackManager = playbackManager,
-            modifier = Modifier.fillMaxSize().align(Alignment.Center),
+            modifier = Modifier
+                .aspectRatio(aspectRatio, videoSize.height < videoSize.width)
+                .fillMaxSize()
+                .align(Alignment.Center),
         )
 
         if (controlsVisible) {
@@ -236,7 +258,7 @@ private fun MobilePlayer(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PlayerButton("↶ 10", { playbackManager.state.rewind(10_000.milliseconds) })
+                    PlayerButton("-10 sec", { playbackManager.state.rewind(10_000.milliseconds) })
                     Spacer(Modifier.width(18.dp))
                     PlayerButton(
                         if (playState == PlayState.PLAYING) "❚❚" else "▶",
@@ -250,7 +272,7 @@ private fun MobilePlayer(
                         primary = true,
                     )
                     Spacer(Modifier.width(18.dp))
-                    PlayerButton("30 ↷", { playbackManager.state.fastForward(30_000.milliseconds) })
+                    PlayerButton("+30 sec", { playbackManager.state.fastForward(30_000.milliseconds) })
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -260,7 +282,7 @@ private fun MobilePlayer(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     BasicText(
-                        formatTime(positionMs),
+                        formatTime(if (scrubbing) scrubMs else positionMs),
                         style = TextStyle(color = Color.White, fontSize = 12.sp),
                     )
                     Spacer(Modifier.width(10.dp))
@@ -274,10 +296,44 @@ private fun MobilePlayer(
                                 detectTapGestures { offset: Offset ->
                                     if (durationMs > 0) {
                                         val fraction = (offset.x / seekWidth.toFloat()).coerceIn(0f, 1f)
-                                        playbackManager.state.seek((durationMs * fraction).toLong().milliseconds)
+                                        val target = (durationMs * fraction).toLong()
+                                        positionMs = target
+                                        playbackManager.state.seek(target.milliseconds)
                                         controlsVisible = true
                                     }
                                 }
+                            }
+                            .pointerInput(durationMs, seekWidth) {
+                                detectHorizontalDragGestures(
+                                    onDragStart = { offset ->
+                                        if (durationMs > 0) {
+                                            scrubbing = true
+                                            playbackManager.state.setScrubbing(true)
+                                            val fraction = (offset.x / seekWidth.toFloat()).coerceIn(0f, 1f)
+                                            scrubMs = (durationMs * fraction).toLong()
+                                            controlsVisible = true
+                                        }
+                                    },
+                                    onHorizontalDrag = { change, _ ->
+                                        if (durationMs > 0) {
+                                            val fraction = (change.position.x / seekWidth.toFloat()).coerceIn(0f, 1f)
+                                            scrubMs = (durationMs * fraction).toLong()
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        if (scrubbing) {
+                                            positionMs = scrubMs
+                                            playbackManager.state.seek(scrubMs.milliseconds)
+                                            playbackManager.state.setScrubbing(false)
+                                            scrubbing = false
+                                            controlsVisible = true
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        playbackManager.state.setScrubbing(false)
+                                        scrubbing = false
+                                    },
+                                )
                             },
                         contentAlignment = Alignment.CenterStart,
                     ) {
@@ -287,7 +343,8 @@ private fun MobilePlayer(
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(Color(0x55FFFFFF))
                         )
-                        val fraction = if (durationMs > 0) positionMs.toFloat() / durationMs.toFloat() else 0f
+                        val visiblePosition = if (scrubbing) scrubMs else positionMs
+                        val fraction = if (durationMs > 0) visiblePosition.toFloat() / durationMs.toFloat() else 0f
                         Box(
                             Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f))
                                 .height(4.dp)
