@@ -8,6 +8,9 @@ import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.CastState
 import com.google.android.gms.cast.framework.SessionManagerListener
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.jellyfin.androidtv.auth.model.Server
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepository
@@ -17,6 +20,20 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URI
+
+data class CastPlaybackState(
+    val connected: Boolean = false,
+    val deviceName: String = "",
+    val active: Boolean = false,
+    val itemId: String = "",
+    val title: String = "",
+    val seriesName: String = "",
+    val positionTicks: Long = 0L,
+    val durationTicks: Long = 0L,
+    val isPaused: Boolean = false,
+    val volumeLevel: Int = 0,
+    val hasNext: Boolean = false,
+)
 
 class VesperCastManager(
     private val activity: FragmentActivity,
@@ -45,6 +62,7 @@ class VesperCastManager(
 
         override fun onSessionStarted(session: CastSession, sessionId: String) {
             receiverReady = false
+            updateConnectionState(session)
             registerMessageListener(session)
             warmReceiver(session)
         }
@@ -60,6 +78,8 @@ class VesperCastManager(
         override fun onSessionEnded(session: CastSession, error: Int) {
             receiverReady = false
             pendingItem = null
+            pendingStartPositionTicks = null
+            _playbackState.value = CastPlaybackState()
         }
 
         override fun onSessionResuming(session: CastSession, sessionId: String) {
@@ -68,6 +88,7 @@ class VesperCastManager(
 
         override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) {
             receiverReady = false
+            updateConnectionState(session)
             registerMessageListener(session)
             warmReceiver(session)
         }
@@ -80,6 +101,7 @@ class VesperCastManager(
 
         override fun onSessionSuspended(session: CastSession, reason: Int) {
             receiverReady = false
+            _playbackState.value = _playbackState.value.copy(connected = false)
         }
     }
 
@@ -88,6 +110,7 @@ class VesperCastManager(
         castContext.sessionManager.currentCastSession
             ?.takeIf { it.isConnected }
             ?.let {
+                updateConnectionState(it)
                 registerMessageListener(it)
                 warmReceiver(it)
             }
@@ -151,6 +174,72 @@ class VesperCastManager(
                     warmReceiver(session)
                 }
             }
+    }
+
+    fun refreshSession() {
+        castContext.sessionManager.currentCastSession
+            ?.takeIf { it.isConnected }
+            ?.let { session ->
+                updateConnectionState(session)
+                registerMessageListener(session)
+                sendIdentify(session)
+            }
+            ?: run {
+                _playbackState.value = CastPlaybackState()
+            }
+    }
+
+    fun togglePlayback(): Boolean {
+        val current = _playbackState.value
+        if (!current.active) return false
+
+        val command = if (current.isPaused) "Unpause" else "Pause"
+        val sent = sendCommand(command)
+        if (sent) {
+            _playbackState.value = current.copy(isPaused = !current.isPaused)
+        }
+        return sent
+    }
+
+    fun seekBy(seconds: Int): Boolean {
+        val current = _playbackState.value
+        if (!current.active) return false
+
+        val currentSeconds = current.positionTicks / TICKS_PER_SECOND
+        val durationSeconds = if (current.durationTicks > 0L) {
+            current.durationTicks / TICKS_PER_SECOND
+        } else Long.MAX_VALUE
+        val target = (currentSeconds + seconds)
+            .coerceAtLeast(0L)
+            .coerceAtMost(durationSeconds)
+
+        return seekTo(target)
+    }
+
+    fun seekTo(seconds: Long): Boolean {
+        val sent = sendCommand(
+            "Seek",
+            JSONObject().put("position", seconds.coerceAtLeast(0L)),
+        )
+        if (sent) {
+            _playbackState.value = _playbackState.value.copy(
+                positionTicks = seconds.coerceAtLeast(0L) * TICKS_PER_SECOND
+            )
+        }
+        return sent
+    }
+
+    fun nextTrack(): Boolean = sendCommand("NextTrack")
+
+    fun stopRemotePlayback(): Boolean {
+        val sent = sendCommand("Stop")
+        if (sent) {
+            _playbackState.value = _playbackState.value.copy(
+                active = false,
+                positionTicks = 0L,
+            )
+        }
+        return sent
     }
 
     fun sendCommand(command: String, options: JSONObject = JSONObject()): Boolean {
@@ -285,7 +374,17 @@ class VesperCastManager(
                 val message = runCatching { JSONObject(rawMessage) }.getOrNull()
                     ?: return@setMessageReceivedCallbacks
 
-                when (message.optString("type")) {
+                val messageType = message.optString("type")
+                if (
+                    messageType == "playbackstart" ||
+                    messageType == "playbackprogress" ||
+                    messageType == "playstatechange" ||
+                    messageType == "playbackstop"
+                ) {
+                    updatePlaybackState(session, messageType, message)
+                }
+
+                when (messageType) {
                     "connectionerror" -> {
                         receiverReady = false
                         showToast("Chromecast couldn't reach your Jellyfin server.")
@@ -323,6 +422,62 @@ class VesperCastManager(
                 showToast("Couldn't open the Jellyfin Cast message channel.")
             }
         }
+    }
+
+    private fun updateConnectionState(session: CastSession) {
+        _playbackState.value = _playbackState.value.copy(
+            connected = session.isConnected,
+            deviceName = session.castDevice?.friendlyName.orEmpty(),
+        )
+    }
+
+    private fun updatePlaybackState(
+        session: CastSession,
+        messageType: String,
+        message: JSONObject,
+    ) {
+        updateConnectionState(session)
+
+        val data = message.optJSONObject("data") ?: return
+        val playState = data.optJSONObject("PlayState")
+        val nowPlaying = data.optJSONObject("NowPlayingItem")
+        val itemId = data.optString("ItemId").ifBlank {
+            nowPlaying?.optString("Id").orEmpty()
+        }
+        val durationTicks = nowPlaying?.optLong("RunTimeTicks", 0L) ?: 0L
+        val positionTicks = playState?.optLong("PositionTicks", 0L) ?: 0L
+        val isPaused = playState?.optBoolean("IsPaused", false) ?: false
+        val volumeLevel = playState?.optInt("VolumeLevel", 0) ?: 0
+
+        val reachedEnd = durationTicks > 0L &&
+            positionTicks >= (durationTicks - TICKS_PER_SECOND).coerceAtLeast(0L)
+
+        val current = _playbackState.value
+        val active = when (messageType) {
+            "playbackstart", "playbackprogress", "playstatechange" -> itemId.isNotBlank()
+            "playbackstop" -> {
+                // The Jellyfin receiver also uses playbackstop as its initial
+                // state response after Identify, so only treat it as a real end
+                // when playback has actually reached the end. Explicit Vesper
+                // stop commands clear the state optimistically.
+                current.active && itemId.isNotBlank() && !reachedEnd
+            }
+            else -> current.active
+        }
+
+        _playbackState.value = current.copy(
+            connected = true,
+            deviceName = session.castDevice?.friendlyName.orEmpty(),
+            active = active,
+            itemId = itemId.ifBlank { current.itemId },
+            title = nowPlaying?.optString("Name").orEmpty().ifBlank { current.title },
+            seriesName = nowPlaying?.optString("SeriesName").orEmpty().ifBlank { current.seriesName },
+            positionTicks = positionTicks,
+            durationTicks = durationTicks.takeIf { it > 0L } ?: current.durationTicks,
+            isPaused = isPaused,
+            volumeLevel = volumeLevel,
+            hasNext = data.optString("NextMediaType").isNotBlank(),
+        )
     }
 
     private fun receiverMessage(message: JSONObject): String {
@@ -425,6 +580,11 @@ class VesperCastManager(
 
     companion object {
         const val NAMESPACE = "urn:x-cast:com.connectsdk"
+        private const val TICKS_PER_SECOND = 10_000_000L
+
+        private val _playbackState = MutableStateFlow(CastPlaybackState())
+        val playbackState: StateFlow<CastPlaybackState> = _playbackState.asStateFlow()
+
         private const val RECEIVER_WARMUP_MS = 2500L
         private const val RETRY_DELAY_MS = 500L
         private const val COMPATIBILITY_RETRY_DELAY_MS = 2200L
