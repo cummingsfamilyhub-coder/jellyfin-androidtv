@@ -70,7 +70,28 @@ jobs:
               '                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />\n',
               ''
           )
+          text = text.replace(
+              '        <!-- Main application -->',
+              '        <!-- Mobile application -->\n'
+              '        <activity\n'
+              '            android:name=".ui.mobile.MobileMainActivity"\n'
+              '            android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden|navigation|uiMode"\n'
+              '            android:launchMode="singleTask" />\n\n'
+              '        <!-- Main application -->'
+          )
           manifest.write_text(text, encoding="utf-8")
+
+          startup = Path("app/src/main/java/org/jellyfin/androidtv/ui/startup/StartupActivity.kt")
+          text = startup.read_text(encoding="utf-8")
+          text = text.replace(
+              'import org.jellyfin.androidtv.ui.browsing.MainActivity',
+              'import org.jellyfin.androidtv.ui.mobile.MobileMainActivity'
+          )
+          text = text.replace(
+              'Intent(this, MainActivity::class.java)',
+              'Intent(this, MobileMainActivity::class.java)'
+          )
+          startup.write_text(text, encoding="utf-8")
 
       - name: Build mobile debug APK
         run: |
