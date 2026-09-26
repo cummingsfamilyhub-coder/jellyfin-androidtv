@@ -210,6 +210,7 @@ private fun MobilePlayer(
     val mediaSegmentRepository = koinInject<MediaSegmentRepository>()
     val scope = rememberCoroutineScope()
     var segments by remember { mutableStateOf<List<MediaSegmentDto>>(emptyList()) }
+    var nextEpisodeLoading by remember { mutableStateOf(false) }
     val hasNextEpisode =
         currentItem?.type == BaseItemKind.EPISODE &&
             queueIndex >= 0 &&
@@ -224,6 +225,7 @@ private fun MobilePlayer(
     BackHandler(onBack = onClose)
 
     LaunchedEffect(currentItem?.id) {
+        nextEpisodeLoading = false
         segments = currentItem?.let { mediaSegmentRepository.getSegmentsForItem(it) }.orEmpty()
     }
 
@@ -339,13 +341,17 @@ private fun MobilePlayer(
                     if (hasNextEpisode) {
                         Spacer(Modifier.width(14.dp))
                         PlayerButton(
-                            "Next Episode ›",
+                            if (nextEpisodeLoading) "Loading…" else "Next Episode ›",
                             {
-                                scope.launch {
-                                    playbackManager.queue.next()
-                                    controlsVisible = true
+                                if (!nextEpisodeLoading) {
+                                    nextEpisodeLoading = true
+                                    scope.launch {
+                                        playbackManager.queue.next()
+                                        controlsVisible = true
+                                    }
                                 }
                             },
+                            enabled = !nextEpisodeLoading,
                         )
                     }
                 }
@@ -445,19 +451,30 @@ private fun PlayerButton(
     onClick: () -> Unit,
     primary: Boolean = false,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(22.dp))
-            .background(if (primary) Color.White else Color(0x33FFFFFF))
-            .clickable(onClick = onClick)
+            .background(
+                when {
+                    !enabled -> Color(0x1FFFFFFF)
+                    primary -> Color.White
+                    else -> Color(0x33FFFFFF)
+                }
+            )
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = if (primary) 24.dp else 17.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
             label,
             style = TextStyle(
-                color = if (primary) Color.Black else Color.White,
+                color = when {
+                    !enabled -> Color(0xFF87919A)
+                    primary -> Color.Black
+                    else -> Color.White
+                },
                 fontSize = if (primary) 18.sp else 14.sp,
                 fontWeight = FontWeight.Bold,
             ),
