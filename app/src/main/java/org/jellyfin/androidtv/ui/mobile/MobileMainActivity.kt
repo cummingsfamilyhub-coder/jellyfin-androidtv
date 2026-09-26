@@ -383,6 +383,136 @@ class MobileMainActivity : FragmentActivity() {
         finish()
     }
 
+    private suspend fun searchSeerr(query: String): List<SeerrSearchResult> =
+        withContext(Dispatchers.IO) {
+            val baseUrl = seerrUrl.trim().trimEnd('/')
+            val apiKey = seerrApiKey.trim()
+            val cleanQuery = query.trim()
+            if (baseUrl.isBlank() || apiKey.isBlank() || cleanQuery.length < 2) {
+                return@withContext emptyList()
+            }
+
+            val encodedQuery = URLEncoder.encode(cleanQuery, StandardCharsets.UTF_8.name())
+            val url = URL("${baseUrl}/api/v1/search?query=${encodedQuery}&page=1")
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 5000
+                readTimeout = 10000
+                setRequestProperty("X-Api-Key", apiKey)
+                setRequestProperty("Accept", "application/json")
+            }
+
+            try {
+                if (connection.responseCode !in 200..299) {
+                    val message = connection.errorStream
+                        ?.bufferedReader()
+                        ?.use { it.readText() }
+                        ?.let { body ->
+                            runCatching { JSONObject(body).optString("message") }.getOrNull()
+                        }
+                        .orEmpty()
+                    throw IllegalStateException(
+                        message.ifBlank { "Seerr returned HTTP ${connection.responseCode}" }
+                    )
+                }
+
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                val results = JSONObject(body).optJSONArray("results") ?: JSONArray()
+
+                buildList {
+                    for (index in 0 until results.length()) {
+                        val item = results.optJSONObject(index) ?: continue
+                        val mediaType = item.optString("mediaType")
+                        if (mediaType != "movie" && mediaType != "tv") continue
+
+                        val title = if (mediaType == "movie") {
+                            item.optString("title")
+                        } else {
+                            item.optString("name")
+                        }.ifBlank { continue }
+
+                        val date = if (mediaType == "movie") {
+                            item.optString("releaseDate")
+                        } else {
+                            item.optString("firstAirDate")
+                        }
+                        val year = date.take(4).toIntOrNull()
+                        val posterPath = item.optString("posterPath")
+                            .takeIf { it.isNotBlank() && it != "null" }
+                        val mediaInfo = item.optJSONObject("mediaInfo")
+                        val mediaStatus = mediaInfo?.optInt("status", SEERR_STATUS_UNKNOWN)
+                            ?: SEERR_STATUS_UNKNOWN
+
+                        add(
+                            SeerrSearchResult(
+                                tmdbId = item.optInt("id"),
+                                mediaType = mediaType,
+                                title = title,
+                                year = year,
+                                overview = item.optString("overview"),
+                                posterUrl = posterPath?.let {
+                                    "https://image.tmdb.org/t/p/w500${it}"
+                                },
+                                mediaStatus = mediaStatus,
+                            )
+                        )
+                    }
+                }
+            } finally {
+                connection.disconnect()
+            }
+        }
+
+    private suspend fun requestSeerr(item: SeerrSearchResult): String? =
+        withContext(Dispatchers.IO) {
+            val baseUrl = seerrUrl.trim().trimEnd('/')
+            val apiKey = seerrApiKey.trim()
+            if (baseUrl.isBlank() || apiKey.isBlank()) {
+                return@withContext "Configure Seerr in Vesper settings first."
+            }
+
+            val connection = (URL("${baseUrl}/api/v1/request").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 5000
+                readTimeout = 15000
+                setRequestProperty("X-Api-Key", apiKey)
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Content-Type", "application/json")
+            }
+
+            try {
+                val payload = JSONObject()
+                    .put("mediaType", item.mediaType)
+                    .put("mediaId", item.tmdbId)
+                if (item.mediaType == "tv") {
+                    payload.put("seasons", "all")
+                }
+
+                connection.outputStream.bufferedWriter().use {
+                    it.write(payload.toString())
+                }
+
+                when (connection.responseCode) {
+                    200, 201 -> null
+                    202 -> "No new seasons are available to request."
+                    409 -> "Already requested."
+                    else -> {
+                        val body = connection.errorStream
+                            ?.bufferedReader()
+                            ?.use { it.readText() }
+                            .orEmpty()
+                        runCatching { JSONObject(body).optString("message") }
+                            .getOrNull()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "Seerr returned HTTP ${connection.responseCode}"
+                    }
+                }
+            } finally {
+                connection.disconnect()
+            }
+        }
+
     private fun openSettings() {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
@@ -435,11 +565,50 @@ class MobileMainActivity : FragmentActivity() {
         }
         container.addView(input)
 
+        container.addView(TextView(this).apply {
+            text = "Seerr URL"
+            textSize = 15f
+            setPadding(0, dp(14), 0, dp(4))
+        })
+
+        val seerrUrlInput = EditText(this).apply {
+            setText(seerrUrl)
+            hint = "http://your-seerr:5055"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSelectAllOnFocus(false)
+            setSingleLine(true)
+        }
+        container.addView(seerrUrlInput)
+
+        container.addView(TextView(this).apply {
+            text = "Seerr API key"
+            textSize = 15f
+            setPadding(0, dp(12), 0, dp(4))
+        })
+
+        val seerrKeyInput = EditText(this).apply {
+            setText(seerrApiKey)
+            hint = "Seerr API key"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSelectAllOnFocus(false)
+            setSingleLine(true)
+        }
+        container.addView(seerrKeyInput)
+
+        container.addView(TextView(this).apply {
+            text = "Used for Search and one-tap media requests."
+            textSize = 12f
+            alpha = 0.72f
+            setPadding(0, 0, 0, dp(8))
+        })
+
         AlertDialog.Builder(this)
             .setTitle("Vesper settings")
             .setView(container)
             .setPositiveButton("Save") { _, _ ->
                 tmdbApiKey = input.text?.toString()?.trim().orEmpty()
+                seerrUrl = seerrUrlInput.text?.toString()?.trim()?.trimEnd('/').orEmpty()
+                seerrApiKey = seerrKeyInput.text?.toString()?.trim().orEmpty()
                 popularityScope = if (localRadio.isChecked) {
                     PopularityScope.LOCAL
                 } else {
@@ -449,6 +618,8 @@ class MobileMainActivity : FragmentActivity() {
                 getSharedPreferences("vesper", MODE_PRIVATE)
                     .edit()
                     .putString("tmdb_api_key", tmdbApiKey)
+                    .putString("seerr_url", seerrUrl)
+                    .putString("seerr_api_key", seerrApiKey)
                     .putString("popularity_scope", popularityScope.name)
                     .apply()
 
