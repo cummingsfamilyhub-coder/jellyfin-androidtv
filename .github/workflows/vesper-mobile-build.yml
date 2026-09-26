@@ -36,6 +36,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import base64
 
           build = Path("app/build.gradle.kts")
           text = build.read_text(encoding="utf-8")
@@ -44,15 +45,23 @@ jobs:
                               'base.archivesName.set("vesper-mobile-v${project.getVersionName()}")')
           build.write_text(text, encoding="utf-8")
 
+          icon_source = Path("app/vesper_icon.b64")
+          icon_dir = Path("app/src/main/res/drawable-nodpi")
+          icon_dir.mkdir(parents=True, exist_ok=True)
+          fallback_icon = Path("app/src/main/res/drawable/vesper_icon.xml")
+          if fallback_icon.exists():
+              fallback_icon.unlink()
+          (icon_dir / "vesper_icon.png").write_bytes(base64.b64decode(icon_source.read_text(encoding="utf-8")))
+
           strings = Path("app/src/main/res/values/strings.xml")
           text = strings.read_text(encoding="utf-8")
           text = text.replace(
               '<string name="app_name_release" translatable="false" tools:ignore="UnusedResources">Vesper</string>',
-              '<string name="app_name_release" translatable="false" tools:ignore="UnusedResources">Vesper Mobile</string>'
+              '<string name="app_name_release" translatable="false" tools:ignore="UnusedResources">Vesper</string>'
           )
           text = text.replace(
               '<string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Vesper</string>',
-              '<string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Vesper Mobile</string>'
+              '<string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Vesper</string>'
           )
           strings.write_text(text, encoding="utf-8")
 
@@ -66,6 +75,7 @@ jobs:
 
           manifest = Path("app/src/main/AndroidManifest.xml")
           text = manifest.read_text(encoding="utf-8")
+          text = text.replace('android:icon="@mipmap/app_icon"', 'android:icon="@drawable/vesper_icon"')
           text = text.replace(
               '                <action android:name="android.intent.action.MAIN" />\n',
               ''
