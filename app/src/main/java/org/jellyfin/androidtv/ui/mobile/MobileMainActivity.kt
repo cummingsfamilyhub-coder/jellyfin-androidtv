@@ -122,7 +122,7 @@ class MobileMainActivity : FragmentActivity() {
                 withContext(Dispatchers.IO) {
                     val resume = async {
                         api.itemsApi.getResumeItems(
-                            fields = ItemRepository.itemFields,
+                            fields = ItemRepository.browseFields,
                             imageTypeLimit = 1,
                             limit = 20,
                             mediaTypes = listOf(MediaType.VIDEO),
@@ -132,40 +132,40 @@ class MobileMainActivity : FragmentActivity() {
                     }
                     val favorites = async {
                         api.itemsApi.getItems(
-                            fields = ItemRepository.itemFields,
+                            fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
                             recursive = true,
                             filters = setOf(ItemFilter.IS_FAVORITE),
                             imageTypeLimit = 1,
-                            limit = 20,
+                            limit = 500,
                             sortBy = setOf(ItemSortBy.SORT_NAME),
                         ).content.items
                     }
                     val movies = async {
                         api.itemsApi.getItems(
-                            fields = ItemRepository.itemFields,
+                            fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.MOVIE),
                             recursive = true,
                             imageTypeLimit = 1,
-                            limit = 24,
+                            limit = 500,
                             sortBy = setOf(ItemSortBy.DATE_CREATED),
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
                     val shows = async {
                         api.itemsApi.getItems(
-                            fields = ItemRepository.itemFields,
+                            fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.SERIES),
                             recursive = true,
                             imageTypeLimit = 1,
-                            limit = 24,
+                            limit = 500,
                             sortBy = setOf(ItemSortBy.DATE_CREATED),
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
                     val boxSets = async {
                         api.itemsApi.getItems(
-                            fields = ItemRepository.itemFields,
+                            fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.BOX_SET),
                             recursive = true,
                             imageTypeLimit = 1,
@@ -267,12 +267,24 @@ private val serviceCollectionAliases = setOf(
     "hulu",
     "bbc iplayer",
     "itvx",
+    "now",
+    "now tv",
 )
 
 private fun isServiceCollection(item: BaseItemDto): Boolean {
     val name = item.name?.trim()?.lowercase() ?: return false
-    return name in serviceCollectionAliases
+    return name.startsWith("streaming:") || name in serviceCollectionAliases
 }
+
+private fun serviceDisplayName(name: String?): String =
+    name.orEmpty()
+        .replace(Regex("^\\s*streaming:\\s*", RegexOption.IGNORE_CASE), "")
+        .ifBlank { "Streaming service" }
+
+private fun collectionDisplayName(name: String?): String =
+    name.orEmpty()
+        .replace(Regex("\\s+collection$", RegexOption.IGNORE_CASE), "")
+        .ifBlank { "Collection" }
 
 private enum class MobileTab(val label: String, val icon: String) {
     HOME("Home", "⌂"),
@@ -436,10 +448,27 @@ private fun MobileHome(
             if (state.movies.isNotEmpty()) item { MediaRow("Movies", state.movies, api, onSelect, onToggleFavorite) }
             if (state.shows.isNotEmpty()) item { MediaRow("TV Shows", state.shows, api, onSelect, onToggleFavorite) }
             if (state.services.isNotEmpty()) item {
-                MediaRow("Services", state.services, api, onSelect, onToggleFavorite, landscape = true)
+                MediaRow(
+                    title = "Services",
+                    media = state.services,
+                    api = api,
+                    onSelect = onSelect,
+                    onToggleFavorite = onToggleFavorite,
+                    landscape = true,
+                    subtitle = "Availability data by JustWatch",
+                    nameFormatter = { serviceDisplayName(it.name) },
+                )
             }
             if (state.collections.isNotEmpty()) item {
-                MediaRow("Collections", state.collections, api, onSelect, onToggleFavorite, landscape = true)
+                MediaRow(
+                    title = "Collections",
+                    media = state.collections,
+                    api = api,
+                    onSelect = onSelect,
+                    onToggleFavorite = onToggleFavorite,
+                    landscape = true,
+                    nameFormatter = { collectionDisplayName(it.name) },
+                )
             }
         }
     }
@@ -678,19 +707,29 @@ private fun MediaRow(
     onSelect: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
     landscape: Boolean = false,
+    subtitle: String? = null,
+    nameFormatter: (BaseItemDto) -> String = { it.name ?: "Untitled" },
 ) {
     Column(Modifier.padding(top = 14.dp)) {
-        BasicText(
-            title,
-            style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+            BasicText(
+                title,
+                style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold),
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Spacer(Modifier.height(2.dp))
+                BasicText(
+                    subtitle,
+                    style = TextStyle(color = Color(0xFF6F7E8C), fontSize = 11.sp),
+                )
+            }
+        }
         LazyRow(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(media, key = { it.id }) { item ->
-                MediaCard(item, api, landscape, onSelect, onToggleFavorite)
+                MediaCard(item, api, landscape, onSelect, onToggleFavorite, nameFormatter)
             }
         }
     }
@@ -703,6 +742,7 @@ private fun MediaCard(
     landscape: Boolean,
     onSelect: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
+    nameFormatter: (BaseItemDto) -> String = { it.name ?: "Untitled" },
 ) {
     val w = if (landscape) 210.dp else 132.dp
     val h = if (landscape) 122.dp else 198.dp
@@ -774,7 +814,7 @@ private fun MediaCard(
 
         Spacer(Modifier.height(7.dp))
         BasicText(
-            item.name ?: "Untitled",
+            nameFormatter(item),
             style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
             maxLines = 1,
         )
@@ -807,6 +847,23 @@ private fun LibraryBrowse(
     onToggleFavorite: (BaseItemDto) -> Unit,
     expanded: Boolean,
 ) {
+    val genres = remember(media) {
+        media
+            .flatMap { it.genres.orEmpty() }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+    var selectedGenre by remember(title, media) { mutableStateOf<String?>(null) }
+    val visibleMedia = remember(media, selectedGenre) {
+        selectedGenre?.let { genre ->
+            media.filter { item ->
+                item.genres.orEmpty().any { it.equals(genre, ignoreCase = true) }
+            }
+        } ?: media
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -818,14 +875,40 @@ private fun LibraryBrowse(
                 style = TextStyle(color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold),
             )
             BasicText(
-                "${media.size} items",
+                if (selectedGenre == null) "${media.size} items"
+                else "${visibleMedia.size} • ${selectedGenre}",
                 style = TextStyle(color = Color(0xFF81909E), fontSize = 13.sp),
             )
         }
 
-        Spacer(Modifier.height(6.dp))
+        if (genres.isNotEmpty()) {
+            LazyRow(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    GenreChip(
+                        label = "All",
+                        selected = selectedGenre == null,
+                        onClick = { selectedGenre = null },
+                    )
+                }
+                items(genres, key = { it }) { genre ->
+                    GenreChip(
+                        label = genre,
+                        selected = selectedGenre == genre,
+                        onClick = {
+                            selectedGenre = if (selectedGenre == genre) null else genre
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        } else {
+            Spacer(Modifier.height(6.dp))
+        }
 
-        if (media.isEmpty()) {
+        if (visibleMedia.isEmpty()) {
             BasicText(
                 "Nothing here yet.",
                 style = TextStyle(color = Color(0xFF95A2AF), fontSize = 15.sp),
@@ -844,11 +927,35 @@ private fun LibraryBrowse(
                 horizontalArrangement = Arrangement.spacedBy(11.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                gridItems(media, key = { it.id }) { item ->
+                gridItems(visibleMedia, key = { it.id }) { item ->
                     GridMediaCard(item, api, onSelect, onToggleFavorite)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun GenreChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) Color(0xFFEAF6FC) else Color(0xFF101821))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 9.dp),
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(
+                color = if (selected) Color(0xFF071017) else Color(0xFFD2DAE2),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+        )
     }
 }
 
@@ -1256,7 +1363,7 @@ private fun SeriesEpisodePicker(
                 api.tvShowsApi.getEpisodes(
                     seriesId = series.id,
                     isMissing = false,
-                    fields = ItemRepository.itemFields,
+                    fields = ItemRepository.browseFields,
                     limit = 500,
                 ).content.items
                     .sortedWith(compareBy<BaseItemDto> { it.parentIndexNumber ?: Int.MAX_VALUE }
