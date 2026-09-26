@@ -803,15 +803,21 @@ private fun serviceDisplayName(name: String?): String =
 
 private fun serviceLogoUrl(name: String?): String? {
     val normalized = serviceDisplayName(name).trim().lowercase()
+
+    if (normalized.contains("apple")) {
+        return "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/28/Apple_TV_Plus_Logo.svg/330px-Apple_TV_Plus_Logo.svg.png"
+    }
+    if (normalized.contains("paramount")) {
+        return "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4e/Paramount%2B_logo.svg/330px-Paramount%2B_logo.svg.png"
+    }
+
     val path = when {
         normalized.contains("netflix") -> "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"
         normalized.contains("disney") -> "/1edZOYAfoyZyZ3rklNSiUpXX30Q.png"
         normalized.contains("amazon") || normalized.contains("prime") ->
             "/w7HfLNm9CWwRmAMU58udl2L7We7.png"
-        normalized.contains("apple") -> "/bngHRFi794mnMq34gfVcm9nDxN1.png"
         normalized == "max" || normalized.contains("hbo") ->
             "/rAb4M1LjGpWASxpk6Va791A7Nkw.png"
-        normalized.contains("paramount") -> "/fi83B1oztoS47xxcemFdPMhIzK.png"
         normalized.contains("iplayer") -> "/nc8Tpsr8SqCbsTUogPDD06gGzB3.jpg"
         normalized.contains("itvx") -> "/1LuvKw01c2KQCt6DqgAgR06H2pT.jpg"
         normalized.startsWith("now") -> "/y7mZSw1FV99yfawxOISBQTvtJxM.jpg"
@@ -1465,8 +1471,8 @@ private fun ProviderWordmark(
         normalized.contains("netflix") -> Color(0xFF050505)
         normalized.contains("disney") -> Color(0xFF102A56)
         normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF07141D)
-        normalized.contains("apple") -> Color.Black
-        normalized.contains("paramount") -> Color(0xFF0A4EE4)
+        normalized.contains("apple") -> Color.White
+        normalized.contains("paramount") -> Color.White
         normalized == "max" || normalized.contains("hbo") -> Color(0xFF24105C)
         normalized.startsWith("now") -> Color(0xFF09130E)
         else -> Color(0xFF111A23)
@@ -1474,6 +1480,8 @@ private fun ProviderWordmark(
     val foreground = when {
         normalized.contains("netflix") -> Color(0xFFE50914)
         normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF27B7E8)
+        normalized.contains("apple") -> Color.Black
+        normalized.contains("paramount") -> Color(0xFF0064FF)
         normalized.startsWith("now") -> Color(0xFF00FF85)
         else -> Color.White
     }
