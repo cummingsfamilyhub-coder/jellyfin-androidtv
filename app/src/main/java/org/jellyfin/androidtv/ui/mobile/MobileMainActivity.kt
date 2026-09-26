@@ -462,7 +462,7 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun playItem(item: BaseItemDto) {
-        if (::castManager.isInitialized && castManager.isConnected() && castManager.play(item)) {
+        if (::castManager.isInitialized && castManager.play(item)) {
             return
         }
 
@@ -1148,7 +1148,7 @@ private fun MediaCard(
                 .clip(RoundedCornerShape(13.dp))
                 .background(Color(0xFF111A23)),
         ) {
-            if (providerTile) {
+            if (providerTile && image == null) {
                 ProviderWordmark(
                     name = serviceDisplayName(item.name),
                     modifier = Modifier.fillMaxSize(),
