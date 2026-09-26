@@ -61,6 +61,7 @@ import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.koin.android.ext.android.inject
+import java.util.UUID
 
 class MobileStartupActivity : FragmentActivity() {
     private val serverRepository by inject<ServerRepository>()
@@ -83,7 +84,9 @@ class MobileStartupActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (sessionRepository.currentSession.value != null && userRepository.currentUser.value != null) {
+        val switchServerId = intent.getStringExtra(EXTRA_SWITCH_SERVER_ID)?.let(UUID::fromString)
+
+        if (switchServerId == null && sessionRepository.currentSession.value != null && userRepository.currentUser.value != null) {
             openHome()
             return
         }
@@ -122,6 +125,15 @@ class MobileStartupActivity : FragmentActivity() {
         lifecycleScope.launch {
             serverRepository.loadStoredServers()
             storedServers = serverRepository.storedServers.value
+
+            if (switchServerId != null) {
+                val target = serverRepository.getServer(switchServerId, true)
+                if (target != null) {
+                    openServer(target)
+                    return@launch
+                }
+            }
+
             val last = storedServers.maxByOrNull { it.dateLastAccessed }
             if (last != null) address = last.address
         }
@@ -271,6 +283,10 @@ class MobileStartupActivity : FragmentActivity() {
             LoginStage.PASSWORD -> stage = LoginStage.USERS
             LoginStage.MANUAL -> stage = LoginStage.USERS
         }
+    }
+
+    companion object {
+        const val EXTRA_SWITCH_SERVER_ID = "switch_server_id"
     }
 }
 
