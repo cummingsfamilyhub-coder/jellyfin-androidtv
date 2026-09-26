@@ -11,7 +11,7 @@ android {
 	compileSdk = libs.versions.android.compileSdk.get().toInt()
 
 	defaultConfig {
-		minSdk = libs.versions.android.minSdk.get().toInt()
+		minSdk = 23
 		targetSdk = libs.versions.android.targetSdk.get().toInt()
 
 		// Release version
@@ -159,6 +159,9 @@ dependencies {
 	implementation(libs.androidx.media3.exoplayer.hls)
 	implementation(libs.androidx.media3.ui)
 	implementation(libs.jellyfin.androidx.media3.ffmpeg.decoder)
+
+	// Google Cast
+	implementation(libs.playservices.castframework)
 
 	// Markdown
 	implementation(libs.bundles.markwon)
