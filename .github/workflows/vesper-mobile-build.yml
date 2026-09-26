@@ -98,6 +98,10 @@ jobs:
               '        <activity\n'
               '            android:name=".ui.mobile.MobileMainActivity"\n'
               '            android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden|navigation|uiMode"\n'
+              '            android:launchMode="singleTask" />\n'
+              '        <activity\n'
+              '            android:name=".ui.mobile.MobilePlayerActivity"\n'
+              '            android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden|navigation|uiMode"\n'
               '            android:launchMode="singleTask" />\n\n'
               '        <!-- Main application -->'
           )
