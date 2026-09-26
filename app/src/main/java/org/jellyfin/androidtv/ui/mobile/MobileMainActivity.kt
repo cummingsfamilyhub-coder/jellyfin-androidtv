@@ -922,7 +922,7 @@ private fun SearchBrowse(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             gridItems(results, key = { it.id }) { item ->
-                GridMediaCard(item, api, onSelect)
+                GridMediaCard(item, api, onSelect, onToggleFavorite)
             }
         }
     }
