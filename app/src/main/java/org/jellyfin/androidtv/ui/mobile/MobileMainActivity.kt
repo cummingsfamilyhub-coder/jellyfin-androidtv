@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -175,11 +176,15 @@ class MobileMainActivity : FragmentActivity() {
                     }
 
                     val allCollections = boxSets.await()
+                    val favoriteItems = favorites.await().filterNot(::isServiceArtifact)
+                    val movieItems = movies.await().filterNot(::isServiceArtifact)
+                    val showItems = shows.await().filterNot(::isServiceArtifact)
+
                     MobileHomeState(
-                        continueWatching = resume.await(),
-                        myV = favorites.await(),
-                        movies = movies.await(),
-                        shows = shows.await(),
+                        continueWatching = resume.await().filterNot(::isServiceArtifact),
+                        myV = favoriteItems,
+                        movies = movieItems,
+                        shows = showItems,
                         services = allCollections.filter(::isServiceCollection),
                         collections = allCollections.filterNot(::isServiceCollection),
                     )
@@ -256,9 +261,11 @@ private val serviceCollectionAliases = setOf(
     "disney+",
     "disney plus",
     "prime video",
+    "amazon prime",
     "amazon prime video",
     "max",
     "hbo max",
+    "apple tv",
     "apple tv+",
     "apple tv plus",
     "paramount+",
@@ -272,6 +279,11 @@ private val serviceCollectionAliases = setOf(
 )
 
 private fun isServiceCollection(item: BaseItemDto): Boolean {
+    val name = item.name?.trim()?.lowercase() ?: return false
+    return name.startsWith("streaming:") || name in serviceCollectionAliases
+}
+
+private fun isServiceArtifact(item: BaseItemDto): Boolean {
     val name = item.name?.trim()?.lowercase() ?: return false
     return name.startsWith("streaming:") || name in serviceCollectionAliases
 }
@@ -467,7 +479,6 @@ private fun MobileHome(
                     onSelect = onSelect,
                     onToggleFavorite = onToggleFavorite,
                     landscape = true,
-                    subtitle = "Availability data by JustWatch",
                     nameFormatter = { serviceDisplayName(it.name) },
                     showFavorite = false,
                     providerTiles = true,
@@ -849,12 +860,14 @@ private fun MediaCard(
             }
         }
 
-        Spacer(Modifier.height(7.dp))
-        BasicText(
-            nameFormatter(item),
-            style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-            maxLines = 1,
-        )
+        if (!providerTile) {
+            Spacer(Modifier.height(7.dp))
+            BasicText(
+                nameFormatter(item),
+                style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+            )
+        }
 
         val secondary = when (item.type) {
             BaseItemKind.EPISODE -> listOfNotNull(
@@ -881,34 +894,51 @@ private fun ProviderWordmark(
     modifier: Modifier = Modifier,
 ) {
     val normalized = name.trim().lowercase()
-    val (label, foreground, background) = when {
-        normalized.contains("netflix") -> Triple("NETFLIX", Color(0xFFE50914), Color(0xFF050505))
-        normalized.contains("disney") -> Triple("Disney+", Color.White, Color(0xFF102A56))
-        normalized.contains("amazon") || normalized.contains("prime") -> Triple("prime video", Color(0xFF00A8E1), Color(0xFF07141D))
-        normalized.contains("apple") -> Triple(" tv+", Color.White, Color.Black)
-        normalized.contains("paramount") -> Triple("Paramount+", Color.White, Color(0xFF0A4EE4))
-        normalized == "max" || normalized.contains("hbo") -> Triple("max", Color.White, Color(0xFF24105C))
-        normalized.startsWith("now") -> Triple("NOW", Color(0xFF00FF85), Color(0xFF09130E))
-        else -> Triple(name, Color.White, Color(0xFF111A23))
+    val logo = when {
+        normalized.contains("netflix") -> R.drawable.logo_netflix
+        normalized.contains("disney") -> R.drawable.logo_disneyplus
+        normalized.contains("amazon") || normalized.contains("prime") -> R.drawable.logo_primevideo
+        normalized.contains("apple") -> R.drawable.logo_appletv
+        normalized.contains("paramount") -> R.drawable.logo_paramountplus
+        normalized == "max" || normalized.contains("hbo") -> R.drawable.logo_max
+        normalized.startsWith("now") -> R.drawable.logo_now
+        else -> null
+    }
+    val background = when {
+        normalized.contains("netflix") -> Color(0xFF050505)
+        normalized.contains("disney") -> Color(0xFF102A56)
+        normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF07141D)
+        normalized.contains("apple") -> Color.Black
+        normalized.contains("paramount") -> Color(0xFF0A4EE4)
+        normalized == "max" || normalized.contains("hbo") -> Color(0xFF24105C)
+        normalized.startsWith("now") -> Color(0xFF09130E)
+        else -> Color(0xFF111A23)
     }
 
     Box(
         modifier = modifier.background(background),
         contentAlignment = Alignment.Center,
     ) {
-        BasicText(
-            label,
-            style = TextStyle(
-                color = foreground,
-                fontSize = when {
-                    label.length > 12 -> 22.sp
-                    label.length > 8 -> 26.sp
-                    else -> 32.sp
-                },
-                fontWeight = FontWeight.Black,
-            ),
-            maxLines = 1,
-        )
+        if (logo != null) {
+            Image(
+                painter = painterResource(logo),
+                contentDescription = name,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 34.dp, vertical = 24.dp),
+            )
+        } else {
+            BasicText(
+                name,
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
+                ),
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -1028,7 +1058,7 @@ private fun CollectionBrowser(
             Spacer(Modifier.height(8.dp))
         }
 
-        if (genres.isNotEmpty()) {
+        if (service && genres.isNotEmpty()) {
             LazyRow(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
