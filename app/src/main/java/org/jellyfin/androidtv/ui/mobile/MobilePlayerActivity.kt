@@ -115,7 +115,7 @@ class MobilePlayerActivity : FragmentActivity() {
                     seriesId = item.id,
                     isMissing = false,
                     fields = ItemRepository.itemFields,
-                    limit = 100,
+                    limit = 500,
                 ).content.items
             }
             BaseItemKind.SEASON -> withContext(Dispatchers.IO) {
@@ -124,7 +124,17 @@ class MobilePlayerActivity : FragmentActivity() {
                     seasonId = item.id,
                     isMissing = false,
                     fields = ItemRepository.itemFields,
-                    limit = 100,
+                    limit = 500,
+                ).content.items
+            }
+            BaseItemKind.EPISODE -> withContext(Dispatchers.IO) {
+                val seriesId = item.seriesId
+                if (seriesId == null) listOf(item)
+                else api.tvShowsApi.getEpisodes(
+                    seriesId = seriesId,
+                    isMissing = false,
+                    fields = ItemRepository.itemFields,
+                    limit = 500,
                 ).content.items
             }
             else -> listOf(item)
@@ -138,6 +148,8 @@ class MobilePlayerActivity : FragmentActivity() {
         val selected = when (item.type) {
             BaseItemKind.SERIES, BaseItemKind.SEASON ->
                 items.firstOrNull { it.userData?.played != true } ?: items.first()
+            BaseItemKind.EPISODE ->
+                items.firstOrNull { it.id == item.id } ?: item
             else -> item
         }
         val startIndex = items.indexOfFirst { it.id == selected.id }.coerceAtLeast(0)
@@ -198,7 +210,10 @@ private fun MobilePlayer(
     val mediaSegmentRepository = koinInject<MediaSegmentRepository>()
     val scope = rememberCoroutineScope()
     var segments by remember { mutableStateOf<List<MediaSegmentDto>>(emptyList()) }
-    val hasNext = queueIndex >= 0 && queueIndex < playbackManager.queue.estimatedSize - 1
+    val hasNextEpisode =
+        currentItem?.type == BaseItemKind.EPISODE &&
+            queueIndex >= 0 &&
+            queueIndex < playbackManager.queue.estimatedSize - 1
     val currentIntro = segments.firstOrNull { segment ->
         segment.type == MediaSegmentType.INTRO &&
             positionMs >= segment.start.inWholeMilliseconds &&
@@ -321,7 +336,7 @@ private fun MobilePlayer(
                         primary = true,
                     )
 
-                    if (hasNext) {
+                    if (hasNextEpisode) {
                         Spacer(Modifier.width(14.dp))
                         PlayerButton(
                             "Next Episode ›",
