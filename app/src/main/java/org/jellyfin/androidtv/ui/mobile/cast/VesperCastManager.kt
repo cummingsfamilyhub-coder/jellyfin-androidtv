@@ -1,19 +1,22 @@
 package org.jellyfin.androidtv.ui.mobile.cast
 
-import androidx.fragment.app.FragmentActivity
-import java.io.IOException
-import android.widget.Toast
-import android.os.Looper
 import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
+import androidx.fragment.app.FragmentActivity
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.CastState
 import com.google.android.gms.cast.framework.SessionManagerListener
+import org.jellyfin.androidtv.auth.model.Server
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
+import java.net.URI
 
 class VesperCastManager(
     private val activity: FragmentActivity,
@@ -23,35 +26,55 @@ class VesperCastManager(
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var receiverReady = false
+    private var pendingItem: BaseItemDto? = null
 
     private val castContext: CastContext by lazy {
         CastContext.getSharedInstance(activity)
     }
 
     private val sessionListener = object : SessionManagerListener<CastSession> {
-        override fun onSessionStarting(session: CastSession) = Unit
+        override fun onSessionStarting(session: CastSession) {
+            receiverReady = false
+        }
 
         override fun onSessionStarted(session: CastSession, sessionId: String) {
             receiverReady = false
             registerMessageListener(session)
-            sendIdentify(session)
+            warmReceiver(session)
         }
 
-        override fun onSessionStartFailed(session: CastSession, error: Int) = Unit
+        override fun onSessionStartFailed(session: CastSession, error: Int) {
+            receiverReady = false
+            pendingItem = null
+            showToast("Couldn't start the Chromecast session.")
+        }
+
         override fun onSessionEnding(session: CastSession) = Unit
+
         override fun onSessionEnded(session: CastSession, error: Int) {
             receiverReady = false
+            pendingItem = null
         }
-        override fun onSessionResuming(session: CastSession, sessionId: String) = Unit
+
+        override fun onSessionResuming(session: CastSession, sessionId: String) {
+            receiverReady = false
+        }
 
         override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) {
             receiverReady = false
             registerMessageListener(session)
-            sendIdentify(session)
+            warmReceiver(session)
         }
 
-        override fun onSessionResumeFailed(session: CastSession, error: Int) = Unit
-        override fun onSessionSuspended(session: CastSession, reason: Int) = Unit
+        override fun onSessionResumeFailed(session: CastSession, error: Int) {
+            receiverReady = false
+            pendingItem = null
+            showToast("Couldn't reconnect to the Chromecast.")
+        }
+
+        override fun onSessionSuspended(session: CastSession, reason: Int) {
+            receiverReady = false
+        }
     }
 
     init {
@@ -60,7 +83,7 @@ class VesperCastManager(
             ?.takeIf { it.isConnected }
             ?.let {
                 registerMessageListener(it)
-                sendIdentify(it)
+                warmReceiver(it)
             }
     }
 
@@ -70,19 +93,97 @@ class VesperCastManager(
         runCatching { castContext.setReceiverApplicationId(value) }
     }
 
-    fun isConnected(): Boolean =
-        castContext.sessionManager.currentCastSession?.isConnected == true
-
+    /**
+     * Attempts to play on Cast when a route is connected or still connecting.
+     *
+     * Returning true means Cast owns this play request, so callers must not
+     * silently fall back to local playback while the receiver is starting.
+     */
     fun play(item: BaseItemDto): Boolean {
+        val castSession = castContext.sessionManager.currentCastSession
+        val castIsStarting = castContext.castState == CastState.CONNECTING
+
+        if (castSession == null && !castIsStarting) {
+            return false
+        }
+
+        if (castSession?.isConnected != true) {
+            pendingItem = item
+            return true
+        }
+
+        if (!receiverReady) {
+            pendingItem = item
+            warmReceiver(castSession)
+            return true
+        }
+
+        return sendPlay(castSession, item)
+    }
+
+    fun sendCommand(command: String, options: JSONObject = JSONObject()): Boolean {
         val castSession = castContext.sessionManager.currentCastSession
             ?.takeIf { it.isConnected }
             ?: return false
+        val currentSession = sessionRepository.currentSession.value
+        val currentServer = serverRepository.currentServer.value
 
-        val currentSession = sessionRepository.currentSession.value ?: return false
-        val currentServer = serverRepository.currentServer.value ?: return false
+        if (currentSession == null || currentServer == null) {
+            showToast("Vesper lost its Jellyfin session. Reconnect before casting.")
+            return true
+        }
+
+        val message = createEnvelope(
+            castSession = castSession,
+            command = command,
+            options = options,
+            userId = currentSession.userId.toString().replace("-", ""),
+            accessToken = currentSession.accessToken,
+            serverAddress = serverAddressForCast(currentServer),
+            serverId = currentServer.id.toString().replace("-", ""),
+            serverVersion = currentServer.version.orEmpty(),
+        )
+
+        sendWithRetry(
+            session = castSession,
+            message = message.toString(),
+            label = command,
+            attemptsLeft = 2,
+        )
+        return true
+    }
+
+    private fun warmReceiver(session: CastSession) {
+        sendIdentify(session)
+
+        // A Cast session can report connected slightly before the Jellyfin
+        // receiver has opened its custom namespace. Give it a short warm-up,
+        // then honour any play request that arrived while connecting.
+        handler.postDelayed({
+            if (!session.isConnected) return@postDelayed
+
+            receiverReady = true
+            val item = pendingItem ?: return@postDelayed
+            pendingItem = null
+            sendPlay(session, item)
+        }, RECEIVER_WARMUP_MS)
+    }
+
+    private fun sendPlay(
+        castSession: CastSession,
+        item: BaseItemDto,
+    ): Boolean {
+        val currentSession = sessionRepository.currentSession.value
+        val currentServer = serverRepository.currentServer.value
+
+        if (currentSession == null || currentServer == null) {
+            showToast("Vesper lost its Jellyfin session. Reconnect before casting.")
+            return true
+        }
 
         val serverId = item.serverId
             ?.takeIf { it.isNotBlank() }
+            ?.replace("-", "")
             ?: currentServer.id.toString().replace("-", "")
 
         val itemStub = JSONObject()
@@ -107,7 +208,7 @@ class VesperCastManager(
             options = options,
             userId = currentSession.userId.toString().replace("-", ""),
             accessToken = currentSession.accessToken,
-            serverAddress = currentServer.address,
+            serverAddress = serverAddressForCast(currentServer),
             serverId = currentServer.id.toString().replace("-", ""),
             serverVersion = currentServer.version.orEmpty(),
         )
@@ -117,33 +218,6 @@ class VesperCastManager(
             message = message.toString(),
             label = item.name ?: "this title",
             attemptsLeft = 3,
-        )
-        return true
-    }
-
-    fun sendCommand(command: String, options: JSONObject = JSONObject()): Boolean {
-        val castSession = castContext.sessionManager.currentCastSession
-            ?.takeIf { it.isConnected }
-            ?: return false
-        val currentSession = sessionRepository.currentSession.value ?: return false
-        val currentServer = serverRepository.currentServer.value ?: return false
-
-        val message = createEnvelope(
-            castSession = castSession,
-            command = command,
-            options = options,
-            userId = currentSession.userId.toString().replace("-", ""),
-            accessToken = currentSession.accessToken,
-            serverAddress = currentServer.address,
-            serverId = currentServer.id.toString().replace("-", ""),
-            serverVersion = currentServer.version.orEmpty(),
-        )
-
-        sendWithRetry(
-            session = castSession,
-            message = message.toString(),
-            label = command,
-            attemptsLeft = 2,
         )
         return true
     }
@@ -158,26 +232,34 @@ class VesperCastManager(
             options = JSONObject(),
             userId = currentSession.userId.toString().replace("-", ""),
             accessToken = currentSession.accessToken,
-            serverAddress = currentServer.address,
+            serverAddress = serverAddressForCast(currentServer),
             serverId = currentServer.id.toString().replace("-", ""),
             serverVersion = currentServer.version.orEmpty(),
         )
+
         session.sendMessage(NAMESPACE, message.toString()).setResultCallback { result ->
-            receiverReady = result.isSuccess
+            if (!result.isSuccess) {
+                receiverReady = false
+            }
         }
     }
 
     private fun registerMessageListener(session: CastSession) {
         runCatching {
             session.setMessageReceivedCallbacks(NAMESPACE) { _, _, rawMessage ->
-                val message = runCatching { JSONObject(rawMessage) }.getOrNull() ?: return@setMessageReceivedCallbacks
+                val message = runCatching { JSONObject(rawMessage) }.getOrNull()
+                    ?: return@setMessageReceivedCallbacks
+
                 when (message.optString("type")) {
-                    "connectionerror" -> showToast("Chromecast couldn't reach your Jellyfin server.")
+                    "connectionerror" -> {
+                        receiverReady = false
+                        showToast("Chromecast couldn't reach your Jellyfin server.")
+                    }
                     "playbackerror" -> showToast(
-                        "Chromecast playback error: " + message.optString("message", "unknown error")
+                        "Chromecast playback error: " + receiverMessage(message)
                     )
                     "error" -> showToast(
-                        "Chromecast error: " + message.optString("message", "unknown error")
+                        "Chromecast error: " + receiverMessage(message)
                     )
                 }
             }
@@ -186,6 +268,14 @@ class VesperCastManager(
                 showToast("Couldn't open the Jellyfin Cast message channel.")
             }
         }
+    }
+
+    private fun receiverMessage(message: JSONObject): String {
+        val direct = message.optString("message")
+        if (direct.isNotBlank()) return direct
+
+        val data = message.opt("data")
+        return data?.toString()?.takeIf { it.isNotBlank() } ?: "unknown error"
     }
 
     private fun sendWithRetry(
@@ -203,16 +293,39 @@ class VesperCastManager(
             if (result.isSuccess) {
                 receiverReady = true
             } else if (attemptsLeft > 1) {
+                receiverReady = false
                 handler.postDelayed({
-                    if (!receiverReady) sendIdentify(session)
+                    sendIdentify(session)
                     handler.postDelayed({
                         sendWithRetry(session, message, label, attemptsLeft - 1)
-                    }, 350)
-                }, 350)
+                    }, RETRY_DELAY_MS)
+                }, RETRY_DELAY_MS)
             } else {
                 showToast("Couldn't send $label to the Jellyfin Cast receiver.")
             }
         }
+    }
+
+    private fun serverAddressForCast(server: Server): String {
+        val address = server.address
+        val host = runCatching { URI(address).host }.getOrNull()
+            ?.trim('[', ']')
+            ?.lowercase()
+
+        val loopback = host == "localhost" ||
+            host == "::1" ||
+            host?.startsWith("127.") == true
+
+        if (!loopback) return address
+
+        return serverRepository.discoveredServers.value
+            .firstOrNull { discovered ->
+                discovered.id == server.id &&
+                    discovered.address.isNotBlank() &&
+                    discovered.address != address
+            }
+            ?.address
+            ?: address
     }
 
     private fun showToast(message: String) {
@@ -254,5 +367,7 @@ class VesperCastManager(
 
     companion object {
         const val NAMESPACE = "urn:x-cast:com.connectsdk"
+        private const val RECEIVER_WARMUP_MS = 900L
+        private const val RETRY_DELAY_MS = 400L
     }
 }
