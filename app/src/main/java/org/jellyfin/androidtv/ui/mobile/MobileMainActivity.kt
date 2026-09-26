@@ -10,7 +10,6 @@ import android.widget.TextView
 import android.widget.RadioGroup
 import android.widget.RadioButton
 import android.widget.LinearLayout
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -429,7 +428,8 @@ class MobileMainActivity : FragmentActivity() {
                             item.optString("title")
                         } else {
                             item.optString("name")
-                        }.ifBlank { continue }
+                        }
+                        if (title.isBlank()) continue
 
                         val date = if (mediaType == "movie") {
                             item.optString("releaseDate")
