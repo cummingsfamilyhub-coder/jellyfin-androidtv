@@ -67,8 +67,30 @@ jobs:
           manifest = Path("app/src/main/AndroidManifest.xml")
           text = manifest.read_text(encoding="utf-8")
           text = text.replace(
+              '                <action android:name="android.intent.action.MAIN" />\n',
+              ''
+          )
+          text = text.replace(
+              '                <category android:name="android.intent.category.LAUNCHER" />\n',
+              ''
+          )
+          text = text.replace(
               '                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />\n',
               ''
+          )
+          text = text.replace(
+              '        <!-- Authentication -->',
+              '        <!-- Mobile authentication -->\n'
+              '        <activity\n'
+              '            android:name=".ui.mobile.MobileStartupActivity"\n'
+              '            android:exported="true"\n'
+              '            android:launchMode="singleTask">\n'
+              '            <intent-filter>\n'
+              '                <action android:name="android.intent.action.MAIN" />\n'
+              '                <category android:name="android.intent.category.LAUNCHER" />\n'
+              '            </intent-filter>\n'
+              '        </activity>\n\n'
+              '        <!-- Authentication -->'
           )
           text = text.replace(
               '        <!-- Main application -->',
