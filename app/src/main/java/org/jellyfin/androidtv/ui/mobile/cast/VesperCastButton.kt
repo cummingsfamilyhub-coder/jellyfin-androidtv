@@ -9,12 +9,19 @@ import com.google.android.gms.cast.framework.CastButtonFactory
 @Composable
 fun VesperCastButton(
     modifier: Modifier = Modifier,
+    onBeforeShowDialog: (() -> Unit)? = null,
 ) {
     AndroidView(
         modifier = modifier,
         factory = { context ->
             MediaRouteButton(context).also { button ->
                 CastButtonFactory.setUpMediaRouteButton(context, button)
+            }
+        },
+        update = { button ->
+            button.setOnClickListener {
+                onBeforeShowDialog?.invoke()
+                button.showDialog()
             }
         },
     )
