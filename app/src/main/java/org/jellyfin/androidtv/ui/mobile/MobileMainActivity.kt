@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -51,6 +53,7 @@ import org.jellyfin.androidtv.util.apiclient.itemImages
 import org.jellyfin.androidtv.util.apiclient.itemBackdropImages
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
+import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ImageType
@@ -387,13 +390,6 @@ private fun MobileDetails(
                         blurHash = backdrop?.blurHash,
                         scaleType = ImageView.ScaleType.CENTER_CROP,
                     )
-                    Box(
-                        Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(120.dp)
-                            .fillMaxSize()
-                            .background(Color(0x5505080C))
-                    )
                     VesperButton(
                         "‹ Back",
                         onBack,
@@ -414,7 +410,7 @@ private fun MobileDetails(
                     ),
                 ) {
                     item {
-                        DetailCopy(item, onPlay, expanded = true)
+                        DetailCopy(item, api, onPlay, expanded = true)
                     }
                 }
             }
@@ -436,13 +432,6 @@ private fun MobileDetails(
                             blurHash = backdrop?.blurHash,
                             scaleType = ImageView.ScaleType.CENTER_CROP,
                         )
-                        Box(
-                            Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .height(80.dp)
-                                .background(Color(0x9905080C))
-                        )
                         VesperButton(
                             "‹ Back",
                             onBack,
@@ -452,7 +441,7 @@ private fun MobileDetails(
                 }
                 item {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
-                        DetailCopy(item, onPlay, expanded = false)
+                        DetailCopy(item, api, onPlay, expanded = false)
                     }
                 }
             }
@@ -463,6 +452,7 @@ private fun MobileDetails(
 @Composable
 private fun DetailCopy(
     item: BaseItemDto,
+    api: ApiClient,
     onPlay: (BaseItemDto) -> Unit,
     expanded: Boolean,
 ) {
@@ -491,12 +481,13 @@ private fun DetailCopy(
         style = TextStyle(color = Color(0xFFA9B5C1), fontSize = 14.sp),
     )
 
-    Spacer(Modifier.height(18.dp))
-
-    VesperButton(
-        if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
-        { onPlay(item) },
-    )
+    if (item.type != BaseItemKind.SERIES) {
+        Spacer(Modifier.height(18.dp))
+        VesperButton(
+            if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
+            { onPlay(item) },
+        )
+    }
 
     if (!item.overview.isNullOrBlank()) {
         Spacer(Modifier.height(22.dp))
@@ -507,6 +498,241 @@ private fun DetailCopy(
                 fontSize = if (expanded) 17.sp else 16.sp,
                 lineHeight = if (expanded) 25.sp else 23.sp,
             ),
+        )
+    }
+
+    if (item.type == BaseItemKind.SERIES) {
+        Spacer(Modifier.height(28.dp))
+        SeriesEpisodePicker(
+            series = item,
+            api = api,
+            onPlay = onPlay,
+            expanded = expanded,
+        )
+    }
+}
+
+@Composable
+private fun SeriesEpisodePicker(
+    series: BaseItemDto,
+    api: ApiClient,
+    onPlay: (BaseItemDto) -> Unit,
+    expanded: Boolean,
+) {
+    var episodes by remember(series.id) { mutableStateOf<List<BaseItemDto>>(emptyList()) }
+    var selectedSeason by remember(series.id) { mutableStateOf<Int?>(null) }
+    var loading by remember(series.id) { mutableStateOf(true) }
+    var error by remember(series.id) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(series.id) {
+        loading = true
+        error = null
+        runCatching {
+            withContext(Dispatchers.IO) {
+                api.tvShowsApi.getEpisodes(
+                    seriesId = series.id,
+                    isMissing = false,
+                    fields = ItemRepository.itemFields,
+                    limit = 500,
+                ).content.items
+                    .sortedWith(compareBy<BaseItemDto> { it.parentIndexNumber ?: Int.MAX_VALUE }
+                        .thenBy { it.indexNumber ?: Int.MAX_VALUE })
+            }
+        }.onSuccess { loaded ->
+            episodes = loaded
+            val seasonWithUnwatched = loaded
+                .firstOrNull { it.userData?.played != true }
+                ?.parentIndexNumber
+            selectedSeason = seasonWithUnwatched
+                ?: loaded.firstOrNull()?.parentIndexNumber
+                ?: 1
+        }.onFailure {
+            error = it.message ?: "Couldn't load episodes."
+        }
+        loading = false
+    }
+
+    BasicText(
+        "Episodes",
+        style = TextStyle(
+            color = Color.White,
+            fontSize = if (expanded) 22.sp else 20.sp,
+            fontWeight = FontWeight.Bold,
+        ),
+    )
+
+    Spacer(Modifier.height(12.dp))
+
+    when {
+        loading -> {
+            BasicText(
+                "Loading episodes…",
+                style = TextStyle(color = Color(0xFF8F9CAA), fontSize = 14.sp),
+            )
+        }
+
+        error != null -> {
+            BasicText(
+                error.orEmpty(),
+                style = TextStyle(color = Color(0xFFFFB7BE), fontSize = 14.sp),
+            )
+        }
+
+        episodes.isEmpty() -> {
+            BasicText(
+                "No episodes found.",
+                style = TextStyle(color = Color(0xFF8F9CAA), fontSize = 14.sp),
+            )
+        }
+
+        else -> {
+            val seasons = episodes
+                .mapNotNull { it.parentIndexNumber }
+                .distinct()
+                .sorted()
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 12.dp),
+            ) {
+                items(seasons, key = { it }) { season ->
+                    SeasonChip(
+                        season = season,
+                        selected = selectedSeason == season,
+                        onClick = { selectedSeason = season },
+                    )
+                }
+            }
+
+            val visibleEpisodes = episodes.filter { episode ->
+                episode.parentIndexNumber == selectedSeason
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                visibleEpisodes.forEach { episode ->
+                    EpisodeRow(
+                        episode = episode,
+                        api = api,
+                        expanded = expanded,
+                        onClick = { onPlay(episode) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeasonChip(
+    season: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) Color(0xFFEAF6FC) else Color(0xFF121B24))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 9.dp),
+    ) {
+        BasicText(
+            "Season $season",
+            style = TextStyle(
+                color = if (selected) Color(0xFF071017) else Color(0xFFD6DEE6),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun EpisodeRow(
+    episode: BaseItemDto,
+    api: ApiClient,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    val image = episode.itemImages[ImageType.PRIMARY]
+    val thumbWidth = if (expanded) 144.dp else 118.dp
+    val thumbHeight = if (expanded) 82.dp else 68.dp
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF0E161E))
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(thumbWidth)
+                .height(thumbHeight)
+                .clip(RoundedCornerShape(9.dp))
+                .background(Color(0xFF17212A)),
+        ) {
+            AsyncImage(
+                modifier = Modifier.fillMaxSize(),
+                url = image?.getUrl(api),
+                blurHash = image?.blurHash,
+                scaleType = ImageView.ScaleType.CENTER_CROP,
+            )
+
+            if (episode.userData?.played == true) {
+                BasicText(
+                    "✓",
+                    style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(Modifier.weight(1f)) {
+            val code = listOfNotNull(
+                episode.parentIndexNumber?.let { "S$it" },
+                episode.indexNumber?.let { "E$it" },
+            ).joinToString("")
+
+            if (code.isNotBlank()) {
+                BasicText(
+                    code,
+                    style = TextStyle(
+                        color = Color(0xFF8BD8FF),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+                Spacer(Modifier.height(3.dp))
+            }
+
+            BasicText(
+                episode.name ?: "Episode",
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = if (expanded) 15.sp else 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                maxLines = 2,
+            )
+
+            if ((episode.userData?.playbackPositionTicks ?: 0L) > 0L && episode.userData?.played != true) {
+                Spacer(Modifier.height(4.dp))
+                BasicText(
+                    "Resume",
+                    style = TextStyle(color = Color(0xFFAAB5C0), fontSize = 12.sp),
+                )
+            }
+        }
+
+        BasicText(
+            "▶",
+            style = TextStyle(color = Color.White, fontSize = 18.sp),
         )
     }
 }
