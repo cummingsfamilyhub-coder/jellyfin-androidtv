@@ -29,6 +29,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import org.jellyfin.androidtv.ui.preference.PreferencesActivity
+import org.jellyfin.androidtv.data.repository.ItemMutationRepository
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.window.Popup
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -77,6 +82,7 @@ class MobileMainActivity : FragmentActivity() {
     private val api by inject<ApiClient>()
     private val sessionRepository by inject<SessionRepository>()
     private val userRepository by inject<UserRepository>()
+    private val itemMutationRepository by inject<ItemMutationRepository>()
 
     private var state by mutableStateOf(MobileHomeState())
     private var selected by mutableStateOf<BaseItemDto?>(null)
@@ -100,6 +106,9 @@ class MobileMainActivity : FragmentActivity() {
                 onBack = { selected = null },
                 onRetry = ::loadHome,
                 onPlay = ::playItem,
+                onToggleFavorite = ::toggleFavorite,
+                onSwitchProfile = ::switchProfile,
+                onSettings = ::openSettings,
             )
         }
 
@@ -154,29 +163,73 @@ class MobileMainActivity : FragmentActivity() {
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
-                    val services = async {
+                    val boxSets = async {
                         api.itemsApi.getItems(
                             fields = ItemRepository.itemFields,
                             includeItemTypes = setOf(BaseItemKind.BOX_SET),
                             recursive = true,
                             imageTypeLimit = 1,
-                            limit = 20,
+                            limit = 100,
                             sortBy = setOf(ItemSortBy.SORT_NAME),
                         ).content.items
                     }
 
+                    val allCollections = boxSets.await()
                     MobileHomeState(
                         continueWatching = resume.await(),
                         myV = favorites.await(),
                         movies = movies.await(),
                         shows = shows.await(),
-                        services = services.await(),
+                        services = allCollections.filter(::isServiceCollection),
+                        collections = allCollections.filterNot(::isServiceCollection),
                     )
                 }
             }.getOrElse { error ->
                 MobileHomeState(error = error.message ?: error::class.java.simpleName)
             }
         }
+    }
+
+    private fun toggleFavorite(item: BaseItemDto) {
+        lifecycleScope.launch {
+            val favorite = item.userData?.isFavorite == true
+            val data = runCatching {
+                itemMutationRepository.setFavorite(item.id, !favorite)
+            }.getOrNull() ?: return@launch
+
+            fun updated(list: List<BaseItemDto>) = list.map { existing ->
+                if (existing.id == item.id) existing.copy(userData = data) else existing
+            }
+
+            val updatedItem = item.copy(userData = data)
+            state = state.copy(
+                continueWatching = updated(state.continueWatching),
+                myV = if (data.isFavorite == true) {
+                    (updated(state.myV) + updatedItem).distinctBy { it.id }
+                } else {
+                    state.myV.filterNot { it.id == item.id }
+                },
+                movies = updated(state.movies),
+                shows = updated(state.shows),
+                services = updated(state.services),
+                collections = updated(state.collections),
+            )
+            if (selected?.id == item.id) selected = updatedItem
+        }
+    }
+
+    private fun switchProfile() {
+        val serverId = sessionRepository.currentSession.value?.serverId ?: return
+        sessionRepository.destroyCurrentSession()
+        startActivity(
+            Intent(this, MobileStartupActivity::class.java)
+                .putExtra(MobileStartupActivity.EXTRA_SWITCH_SERVER_ID, serverId.toString())
+        )
+        finish()
+    }
+
+    private fun openSettings() {
+        startActivity(Intent(this, PreferencesActivity::class.java))
     }
 
     private fun playItem(item: BaseItemDto) {
@@ -195,7 +248,31 @@ private data class MobileHomeState(
     val movies: List<BaseItemDto> = emptyList(),
     val shows: List<BaseItemDto> = emptyList(),
     val services: List<BaseItemDto> = emptyList(),
+    val collections: List<BaseItemDto> = emptyList(),
 )
+
+private val serviceCollectionAliases = setOf(
+    "netflix",
+    "disney+",
+    "disney plus",
+    "prime video",
+    "amazon prime video",
+    "max",
+    "hbo max",
+    "apple tv+",
+    "apple tv plus",
+    "paramount+",
+    "paramount plus",
+    "peacock",
+    "hulu",
+    "bbc iplayer",
+    "itvx",
+)
+
+private fun isServiceCollection(item: BaseItemDto): Boolean {
+    val name = item.name?.trim()?.lowercase() ?: return false
+    return name in serviceCollectionAliases
+}
 
 private enum class MobileTab(val label: String, val icon: String) {
     HOME("Home", "⌂"),
@@ -215,6 +292,9 @@ private fun VesperMobile(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onPlay: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
+    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
 
@@ -222,12 +302,13 @@ private fun VesperMobile(
         Modifier
             .fillMaxSize()
             .background(Color(0xFF05080C))
+            .statusBarsPadding()
     ) {
         val expanded = maxWidth >= 600.dp
 
         if (selected != null) {
             BackHandler(onBack = onBack)
-            MobileDetails(selected, api, onBack, onPlay)
+            MobileDetails(selected, api, onBack, onPlay, onToggleFavorite)
         } else {
             BackHandler(enabled = tab != MobileTab.HOME) { tab = MobileTab.HOME }
 
@@ -239,6 +320,9 @@ private fun VesperMobile(
                     onSelect = onSelect,
                     onRetry = onRetry,
                     onPlay = onPlay,
+                    onToggleFavorite = onToggleFavorite,
+                    onSwitchProfile = onSwitchProfile,
+                    onSettings = onSettings,
                     expanded = expanded,
                 )
                 MobileTab.MOVIES -> LibraryBrowse(
@@ -246,6 +330,7 @@ private fun VesperMobile(
                     media = state.movies,
                     api = api,
                     onSelect = onSelect,
+                    onToggleFavorite = onToggleFavorite,
                     expanded = expanded,
                 )
                 MobileTab.TV -> LibraryBrowse(
@@ -253,6 +338,7 @@ private fun VesperMobile(
                     media = state.shows,
                     api = api,
                     onSelect = onSelect,
+                    onToggleFavorite = onToggleFavorite,
                     expanded = expanded,
                 )
                 MobileTab.MYV -> LibraryBrowse(
@@ -260,12 +346,14 @@ private fun VesperMobile(
                     media = state.myV,
                     api = api,
                     onSelect = onSelect,
+                    onToggleFavorite = onToggleFavorite,
                     expanded = expanded,
                 )
                 MobileTab.SEARCH -> SearchBrowse(
                     state = state,
                     api = api,
                     onSelect = onSelect,
+                    onToggleFavorite = onToggleFavorite,
                     expanded = expanded,
                 )
             }
@@ -287,13 +375,22 @@ private fun MobileHome(
     onSelect: (BaseItemDto) -> Unit,
     onRetry: () -> Unit,
     onPlay: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
+    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
     expanded: Boolean,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 92.dp),
     ) {
-        item { MobileTopBar(userName) }
+        item {
+            MobileTopBar(
+                userName = userName,
+                onSwitchProfile = onSwitchProfile,
+                onSettings = onSettings,
+            )
+        }
 
         if (state.loading) {
             item {
@@ -318,8 +415,6 @@ private fun MobileHome(
             }
         } else {
             val hero = state.continueWatching.firstOrNull()
-                ?: state.movies.firstOrNull()
-                ?: state.shows.firstOrNull()
 
             if (hero != null) {
                 item {
@@ -329,29 +424,39 @@ private fun MobileHome(
                         expanded = expanded,
                         onPlay = onPlay,
                         onInfo = { onSelect(hero) },
+                        onToggleFavorite = { onToggleFavorite(hero) },
                     )
                 }
             }
 
             if (state.continueWatching.isNotEmpty()) item {
-                MediaRow("Continue Watching", state.continueWatching, api, onSelect, landscape = true)
+                MediaRow("Continue Watching", state.continueWatching, api, onSelect, onToggleFavorite, landscape = true)
             }
-            if (state.myV.isNotEmpty()) item { MediaRow("MyV", state.myV, api, onSelect) }
-            if (state.movies.isNotEmpty()) item { MediaRow("Movies", state.movies, api, onSelect) }
-            if (state.shows.isNotEmpty()) item { MediaRow("TV Shows", state.shows, api, onSelect) }
+            if (state.myV.isNotEmpty()) item { MediaRow("MyV", state.myV, api, onSelect, onToggleFavorite) }
+            if (state.movies.isNotEmpty()) item { MediaRow("Movies", state.movies, api, onSelect, onToggleFavorite) }
+            if (state.shows.isNotEmpty()) item { MediaRow("TV Shows", state.shows, api, onSelect, onToggleFavorite) }
             if (state.services.isNotEmpty()) item {
-                MediaRow("Services", state.services, api, onSelect, landscape = true)
+                MediaRow("Services", state.services, api, onSelect, onToggleFavorite, landscape = true)
+            }
+            if (state.collections.isNotEmpty()) item {
+                MediaRow("Collections", state.collections, api, onSelect, onToggleFavorite, landscape = true)
             }
         }
     }
 }
 
 @Composable
-private fun MobileTopBar(userName: String) {
+private fun MobileTopBar(
+    userName: String,
+    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 12.dp),
+            .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Image(
@@ -373,18 +478,77 @@ private fun MobileTopBar(userName: String) {
             )
         }
 
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFF172632)),
-            contentAlignment = Alignment.Center,
-        ) {
-            BasicText(
-                userName.take(1).uppercase(),
-                style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold),
-            )
+        Box {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF172632))
+                    .clickable { menuOpen = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    userName.take(1).uppercase(),
+                    style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+
+            if (menuOpen) {
+                Popup(
+                    alignment = Alignment.TopEnd,
+                    onDismissRequest = { menuOpen = false },
+                    properties = PopupProperties(focusable = true),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .width(220.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF111922))
+                            .padding(10.dp),
+                    ) {
+                        BasicText(
+                            userName,
+                            style = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                        )
+                        ProfileMenuRow("⇄", "Switch profile") {
+                            menuOpen = false
+                            onSwitchProfile()
+                        }
+                        ProfileMenuRow("⚙", "Settings") {
+                            menuOpen = false
+                            onSettings()
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun ProfileMenuRow(
+    icon: String,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicText(
+            icon,
+            style = TextStyle(color = Color(0xFFBDEBFF), fontSize = 17.sp, fontWeight = FontWeight.Bold),
+        )
+        Spacer(Modifier.width(11.dp))
+        BasicText(
+            label,
+            style = TextStyle(color = Color(0xFFE4EAF0), fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+        )
     }
 }
 
@@ -395,6 +559,7 @@ private fun VesperHero(
     expanded: Boolean,
     onPlay: (BaseItemDto) -> Unit,
     onInfo: () -> Unit,
+    onToggleFavorite: () -> Unit,
 ) {
     val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages[ImageType.PRIMARY]
     val heroHeight = if (expanded) 390.dp else 330.dp
@@ -494,6 +659,10 @@ private fun VesperHero(
                     { onPlay(item) },
                 )
                 DarkButton("More Info", onInfo)
+                FavoriteButton(
+                    favorite = item.userData?.isFavorite == true,
+                    onClick = onToggleFavorite,
+                )
             }
         }
     }
@@ -507,6 +676,7 @@ private fun MediaRow(
     media: List<BaseItemDto>,
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
     landscape: Boolean = false,
 ) {
     Column(Modifier.padding(top = 14.dp)) {
@@ -520,7 +690,7 @@ private fun MediaRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(media, key = { it.id }) { item ->
-                MediaCard(item, api, landscape, onSelect)
+                MediaCard(item, api, landscape, onSelect, onToggleFavorite)
             }
         }
     }
@@ -532,6 +702,7 @@ private fun MediaCard(
     api: ApiClient,
     landscape: Boolean,
     onSelect: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
 ) {
     val w = if (landscape) 210.dp else 132.dp
     val h = if (landscape) 122.dp else 198.dp
@@ -558,11 +729,23 @@ private fun MediaCard(
                 scaleType = ImageView.ScaleType.CENTER_CROP,
             )
 
-            if (item.userData?.isFavorite == true) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(7.dp)
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0x9905080C))
+                    .clickable { onToggleFavorite(item) },
+                contentAlignment = Alignment.Center,
+            ) {
                 BasicText(
-                    "♥",
-                    style = TextStyle(color = Color.White, fontSize = 16.sp),
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                    if (item.userData?.isFavorite == true) "♥" else "♡",
+                    style = TextStyle(
+                        color = if (item.userData?.isFavorite == true) Color(0xFFFF4D7A) else Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
                 )
             }
 
@@ -621,6 +804,7 @@ private fun LibraryBrowse(
     media: List<BaseItemDto>,
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
     expanded: Boolean,
 ) {
     Column(
@@ -661,7 +845,7 @@ private fun LibraryBrowse(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 gridItems(media, key = { it.id }) { item ->
-                    GridMediaCard(item, api, onSelect)
+                    GridMediaCard(item, api, onSelect, onToggleFavorite)
                 }
             }
         }
@@ -673,6 +857,7 @@ private fun SearchBrowse(
     state: MobileHomeState,
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
     expanded: Boolean,
 ) {
     var query by remember { mutableStateOf("") }
@@ -748,6 +933,7 @@ private fun GridMediaCard(
     item: BaseItemDto,
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
 ) {
     val image = item.itemImages[ImageType.PRIMARY]
 
@@ -769,11 +955,23 @@ private fun GridMediaCard(
                 blurHash = image?.blurHash,
                 scaleType = ImageView.ScaleType.CENTER_CROP,
             )
-            if (item.userData?.isFavorite == true) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(30.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Color(0x9905080C))
+                    .clickable { onToggleFavorite(item) },
+                contentAlignment = Alignment.Center,
+            ) {
                 BasicText(
-                    "♥",
-                    style = TextStyle(color = Color.White, fontSize = 15.sp),
-                    modifier = Modifier.align(Alignment.TopEnd).padding(7.dp),
+                    if (item.userData?.isFavorite == true) "♥" else "♡",
+                    style = TextStyle(
+                        color = if (item.userData?.isFavorite == true) Color(0xFFFF4D7A) else Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
                 )
             }
         }
@@ -839,6 +1037,30 @@ private fun MobileBottomNav(
 }
 
 @Composable
+private fun FavoriteButton(
+    favorite: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xAA111820))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            if (favorite) "♥ MyV" else "♡ MyV",
+            style = TextStyle(
+                color = if (favorite) Color(0xFFFF4D7A) else Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
+    }
+}
+
+@Composable
 private fun DarkButton(
     label: String,
     onClick: () -> Unit,
@@ -863,6 +1085,7 @@ private fun MobileDetails(
     api: ApiClient,
     onBack: () -> Unit,
     onPlay: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
 ) {
     val primary = item.itemImages[ImageType.PRIMARY]
     val backdrop = item.itemBackdropImages.firstOrNull() ?: primary
@@ -904,7 +1127,7 @@ private fun MobileDetails(
                     ),
                 ) {
                     item {
-                        DetailCopy(item, api, onPlay, expanded = true)
+                        DetailCopy(item, api, onPlay, onToggleFavorite, expanded = true)
                     }
                 }
             }
@@ -935,7 +1158,7 @@ private fun MobileDetails(
                 }
                 item {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
-                        DetailCopy(item, api, onPlay, expanded = false)
+                        DetailCopy(item, api, onPlay, onToggleFavorite, expanded = false)
                     }
                 }
             }
@@ -948,6 +1171,7 @@ private fun DetailCopy(
     item: BaseItemDto,
     api: ApiClient,
     onPlay: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
     expanded: Boolean,
 ) {
     BasicText(
@@ -977,10 +1201,16 @@ private fun DetailCopy(
 
     if (item.type != BaseItemKind.SERIES) {
         Spacer(Modifier.height(18.dp))
-        VesperButton(
-            if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
-            { onPlay(item) },
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            VesperButton(
+                if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
+                { onPlay(item) },
+            )
+            FavoriteButton(
+                favorite = item.userData?.isFavorite == true,
+                onClick = { onToggleFavorite(item) },
+            )
+        }
     }
 
     if (!item.overview.isNullOrBlank()) {
