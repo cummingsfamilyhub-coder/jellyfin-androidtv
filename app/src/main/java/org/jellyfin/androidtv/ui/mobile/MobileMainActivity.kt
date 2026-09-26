@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,6 +48,7 @@ import org.jellyfin.androidtv.data.repository.ItemRepository
 import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.jellyfin.androidtv.util.apiclient.getUrl
 import org.jellyfin.androidtv.util.apiclient.itemImages
+import org.jellyfin.androidtv.util.apiclient.itemBackdropImages
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.model.api.BaseItemDto
@@ -365,62 +367,147 @@ private fun MobileDetails(
     onBack: () -> Unit,
     onPlay: (BaseItemDto) -> Unit,
 ) {
-    val image = item.itemImages[ImageType.PRIMARY]
-    LazyColumn(Modifier.fillMaxSize()) {
-        item {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(390.dp).background(Color(0xFF101820)),
-            ) {
-                AsyncImage(
-                    modifier = Modifier.fillMaxSize(),
-                    url = image?.getUrl(api),
-                    blurHash = image?.blurHash,
-                    scaleType = ImageView.ScaleType.CENTER_CROP,
-                )
+    val primary = item.itemImages[ImageType.PRIMARY]
+    val backdrop = item.itemBackdropImages.firstOrNull() ?: primary
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val expanded = maxWidth >= 600.dp
+
+        if (expanded) {
+            Row(Modifier.fillMaxSize().background(Color(0xFF05080C))) {
                 Box(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(125.dp)
-                        .background(Color(0xCC05080C))
-                )
-                VesperButton("‹ Back", onBack, Modifier.align(Alignment.TopStart).padding(18.dp))
-            }
-        }
-        item {
-            Column(Modifier.padding(20.dp)) {
-                BasicText(
-                    item.name ?: "Untitled",
-                    style = TextStyle(color = Color.White, fontSize = 31.sp, fontWeight = FontWeight.Bold),
-                )
-                Spacer(Modifier.height(8.dp))
-                BasicText(
-                    listOfNotNull(
-                        item.productionYear?.toString(),
-                        item.officialRating,
-                        when (item.type) {
-                            BaseItemKind.MOVIE -> "Movie"
-                            BaseItemKind.SERIES -> "TV Series"
-                            BaseItemKind.EPISODE -> "Episode"
-                            else -> null
-                        },
-                    ).joinToString("  •  "),
-                    style = TextStyle(color = Color(0xFFA9B5C1), fontSize = 14.sp),
-                )
-                Spacer(Modifier.height(18.dp))
-                VesperButton(
-                    if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
-                    { onPlay(item) },
-                )
-                Spacer(Modifier.height(20.dp))
-                if (!item.overview.isNullOrBlank()) {
-                    BasicText(
-                        item.overview.orEmpty(),
-                        style = TextStyle(color = Color(0xFFD0D7DE), fontSize = 16.sp, lineHeight = 23.sp),
+                    modifier = Modifier
+                        .weight(1.15f)
+                        .fillMaxSize()
+                        .background(Color(0xFF101820)),
+                ) {
+                    AsyncImage(
+                        modifier = Modifier.fillMaxSize(),
+                        url = backdrop?.getUrl(api),
+                        blurHash = backdrop?.blurHash,
+                        scaleType = ImageView.ScaleType.CENTER_CROP,
                     )
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(120.dp)
+                            .fillMaxSize()
+                            .background(Color(0x5505080C))
+                    )
+                    VesperButton(
+                        "‹ Back",
+                        onBack,
+                        Modifier.align(Alignment.TopStart).padding(24.dp),
+                    )
+                }
+
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(.85f)
+                        .fillMaxSize()
+                        .background(Color(0xFF05080C)),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 30.dp,
+                        end = 30.dp,
+                        top = 54.dp,
+                        bottom = 40.dp,
+                    ),
+                ) {
+                    item {
+                        DetailCopy(item, onPlay, expanded = true)
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().background(Color(0xFF05080C)),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 34.dp),
+            ) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(235.dp)
+                            .background(Color(0xFF101820)),
+                    ) {
+                        AsyncImage(
+                            modifier = Modifier.fillMaxSize(),
+                            url = backdrop?.getUrl(api),
+                            blurHash = backdrop?.blurHash,
+                            scaleType = ImageView.ScaleType.CENTER_CROP,
+                        )
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .height(80.dp)
+                                .background(Color(0x9905080C))
+                        )
+                        VesperButton(
+                            "‹ Back",
+                            onBack,
+                            Modifier.align(Alignment.TopStart).padding(16.dp),
+                        )
+                    }
+                }
+                item {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                        DetailCopy(item, onPlay, expanded = false)
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DetailCopy(
+    item: BaseItemDto,
+    onPlay: (BaseItemDto) -> Unit,
+    expanded: Boolean,
+) {
+    BasicText(
+        item.name ?: "Untitled",
+        style = TextStyle(
+            color = Color.White,
+            fontSize = if (expanded) 38.sp else 30.sp,
+            fontWeight = FontWeight.Bold,
+        ),
+    )
+
+    Spacer(Modifier.height(9.dp))
+
+    BasicText(
+        listOfNotNull(
+            item.productionYear?.toString(),
+            item.officialRating,
+            when (item.type) {
+                BaseItemKind.MOVIE -> "Movie"
+                BaseItemKind.SERIES -> "TV Series"
+                BaseItemKind.EPISODE -> "Episode"
+                else -> null
+            },
+        ).joinToString("  •  "),
+        style = TextStyle(color = Color(0xFFA9B5C1), fontSize = 14.sp),
+    )
+
+    Spacer(Modifier.height(18.dp))
+
+    VesperButton(
+        if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
+        { onPlay(item) },
+    )
+
+    if (!item.overview.isNullOrBlank()) {
+        Spacer(Modifier.height(22.dp))
+        BasicText(
+            item.overview.orEmpty(),
+            style = TextStyle(
+                color = Color(0xFFD0D7DE),
+                fontSize = if (expanded) 17.sp else 16.sp,
+                lineHeight = if (expanded) 25.sp else 23.sp,
+            ),
+        )
     }
 }
 
