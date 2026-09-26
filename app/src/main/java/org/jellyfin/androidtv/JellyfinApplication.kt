@@ -15,6 +15,7 @@ import org.jellyfin.androidtv.data.eventhandling.SocketHandler
 import org.jellyfin.androidtv.data.repository.NotificationsRepository
 import org.jellyfin.androidtv.integration.LeanbackChannelWorker
 import org.jellyfin.androidtv.telemetry.TelemetryService
+import org.jellyfin.androidtv.util.isTvDevice
 import org.koin.android.ext.android.inject
 import java.util.concurrent.TimeUnit
 
@@ -37,19 +38,19 @@ class JellyfinApplication : Application() {
 		val workManager by inject<WorkManager>()
 		val socketListener by inject<SocketHandler>()
 
-		// Update background worker
+		// Update background worker only on Android TV devices.
 		launch {
-			// Cancel all current workers
 			workManager.cancelAllWork().await()
 
-			// Recreate periodic workers
-			workManager.enqueueUniquePeriodicWork(
-				LeanbackChannelWorker.PERIODIC_UPDATE_REQUEST_NAME,
-				ExistingPeriodicWorkPolicy.UPDATE,
-				PeriodicWorkRequestBuilder<LeanbackChannelWorker>(1, TimeUnit.HOURS)
-					.setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.MINUTES)
-					.build()
-			).await()
+			if (isTvDevice()) {
+				workManager.enqueueUniquePeriodicWork(
+					LeanbackChannelWorker.PERIODIC_UPDATE_REQUEST_NAME,
+					ExistingPeriodicWorkPolicy.UPDATE,
+					PeriodicWorkRequestBuilder<LeanbackChannelWorker>(1, TimeUnit.HOURS)
+						.setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.MINUTES)
+						.build()
+				).await()
+			}
 		}
 
 		// Update WebSockets
