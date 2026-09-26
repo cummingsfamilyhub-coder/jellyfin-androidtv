@@ -33,5 +33,6 @@ object ItemRepository {
 		ItemFields.GENRES,
 		ItemFields.OVERVIEW,
 		ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
+		ItemFields.PROVIDER_IDS,
 	)
 }
