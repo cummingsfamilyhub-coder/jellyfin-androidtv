@@ -44,9 +44,7 @@ import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.data.repository.ItemRepository
-import org.jellyfin.androidtv.ui.browsing.MainActivity
 import org.jellyfin.androidtv.ui.composable.AsyncImage
-import org.jellyfin.androidtv.util.PlaybackHelper
 import org.jellyfin.androidtv.util.apiclient.getUrl
 import org.jellyfin.androidtv.util.apiclient.itemImages
 import org.jellyfin.sdk.api.client.ApiClient
@@ -64,7 +62,6 @@ class MobileMainActivity : FragmentActivity() {
     private val api by inject<ApiClient>()
     private val sessionRepository by inject<SessionRepository>()
     private val userRepository by inject<UserRepository>()
-    private val playbackHelper by inject<PlaybackHelper>()
 
     private var state by mutableStateOf(MobileHomeState())
     private var selected by mutableStateOf<BaseItemDto?>(null)
@@ -168,10 +165,10 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun playItem(item: BaseItemDto) {
-        // Existing Jellyfin playback UI still lives in MainActivity for this smoke-test build.
-        // Launch it only when playback is requested; the mobile home never enters the TV browsing stack.
-        startActivity(Intent(this, MainActivity::class.java))
-        playbackHelper.retrieveAndPlay(item.id, false, null, this)
+        startActivity(
+            Intent(this, MobilePlayerActivity::class.java)
+                .putExtra(MobilePlayerActivity.EXTRA_ITEM_ID, item.id.toString())
+        )
     }
 }
 
