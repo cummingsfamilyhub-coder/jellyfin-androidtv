@@ -46,7 +46,6 @@ import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.data.repository.ItemRepository
 import org.jellyfin.androidtv.ui.browsing.MainActivity
 import org.jellyfin.androidtv.ui.composable.AsyncImage
-import org.jellyfin.androidtv.ui.startup.StartupActivity
 import org.jellyfin.androidtv.util.PlaybackHelper
 import org.jellyfin.androidtv.util.apiclient.getUrl
 import org.jellyfin.androidtv.util.apiclient.itemImages
@@ -74,7 +73,7 @@ class MobileMainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
 
         if (sessionRepository.currentSession.value == null || userRepository.currentUser.value == null) {
-            startActivity(Intent(this, StartupActivity::class.java))
+            startActivity(Intent(this, MobileStartupActivity::class.java))
             finish()
             return
         }
