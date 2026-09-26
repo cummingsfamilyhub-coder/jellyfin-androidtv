@@ -1932,12 +1932,6 @@ private fun MobileDetails(
                         onBack,
                         Modifier.align(Alignment.TopStart).padding(24.dp),
                     )
-                    VesperCastButton(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(24.dp)
-                            .size(44.dp),
-                    )
                 }
 
                 LazyColumn(
@@ -1979,12 +1973,6 @@ private fun MobileDetails(
                             "‹ Back",
                             onBack,
                             Modifier.align(Alignment.TopStart).padding(16.dp),
-                        )
-                        VesperCastButton(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(16.dp)
-                                .size(44.dp),
                         )
                     }
                 }
