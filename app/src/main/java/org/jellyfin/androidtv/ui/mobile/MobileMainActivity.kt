@@ -654,6 +654,24 @@ private enum class PopularityScope {
     LOCAL,
 }
 
+private const val SEERR_STATUS_UNKNOWN = 1
+private const val SEERR_STATUS_PENDING = 2
+private const val SEERR_STATUS_PROCESSING = 3
+private const val SEERR_STATUS_PARTIALLY_AVAILABLE = 4
+private const val SEERR_STATUS_AVAILABLE = 5
+private const val SEERR_STATUS_BLOCKLISTED = 6
+private const val SEERR_STATUS_DELETED = 7
+
+private data class SeerrSearchResult(
+    val tmdbId: Int,
+    val mediaType: String,
+    val title: String,
+    val year: Int?,
+    val overview: String,
+    val posterUrl: String?,
+    val mediaStatus: Int,
+)
+
 private enum class LibrarySort(val label: String) {
     POPULARITY("Popularity"),
     NEWEST("Newest"),
@@ -821,6 +839,9 @@ private fun VesperMobile(
     selected: BaseItemDto?,
     userName: String,
     api: ApiClient,
+    seerrConfigured: Boolean,
+    onSeerrSearch: suspend (String) -> List<SeerrSearchResult>,
+    onSeerrRequest: suspend (SeerrSearchResult) -> String?,
     onSelect: (BaseItemDto) -> Unit,
     onBack: () -> Unit,
     onRetry: () -> Unit,
@@ -908,6 +929,9 @@ private fun VesperMobile(
                 MobileTab.SEARCH -> SearchBrowse(
                     state = state,
                     api = api,
+                    seerrConfigured = seerrConfigured,
+                    onSeerrSearch = onSeerrSearch,
+                    onSeerrRequest = onSeerrRequest,
                     onSelect = onSelect,
                     onToggleFavorite = onToggleFavorite,
                     expanded = expanded,
