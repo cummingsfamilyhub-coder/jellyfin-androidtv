@@ -10,6 +10,7 @@ import android.widget.TextView
 import android.widget.RadioGroup
 import android.widget.RadioButton
 import android.widget.LinearLayout
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -21,6 +22,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -49,6 +51,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -66,6 +69,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepository
@@ -91,6 +95,7 @@ import java.net.URLEncoder
 import java.net.URL
 import java.net.HttpURLConnection
 import org.json.JSONArray
+import org.json.JSONObject
 
 class MobileMainActivity : FragmentActivity() {
     private val api by inject<ApiClient>()
@@ -103,6 +108,8 @@ class MobileMainActivity : FragmentActivity() {
     private var popularity by mutableStateOf(PopularityState())
     private var selected by mutableStateOf<BaseItemDto?>(null)
     private var tmdbApiKey by mutableStateOf("")
+    private var seerrUrl by mutableStateOf("")
+    private var seerrApiKey by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,6 +124,12 @@ class MobileMainActivity : FragmentActivity() {
         val vesperPreferences = getSharedPreferences("vesper", MODE_PRIVATE)
         tmdbApiKey = vesperPreferences
             .getString("tmdb_api_key", "")
+            .orEmpty()
+        seerrUrl = vesperPreferences
+            .getString("seerr_url", "")
+            .orEmpty()
+        seerrApiKey = vesperPreferences
+            .getString("seerr_api_key", "")
             .orEmpty()
         popularityScope = runCatching {
             PopularityScope.valueOf(
@@ -134,6 +147,9 @@ class MobileMainActivity : FragmentActivity() {
                 selected = selected,
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
                 api = api,
+                seerrConfigured = seerrUrl.isNotBlank() && seerrApiKey.isNotBlank(),
+                onSeerrSearch = ::searchSeerr,
+                onSeerrRequest = ::requestSeerr,
                 onSelect = { selected = it },
                 onBack = { selected = null },
                 onRetry = ::loadHome,
@@ -446,19 +462,10 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun playItem(item: BaseItemDto) {
-        if (::castManager.isInitialized && castManager.play(item)) {
-            return
-        }
-
         startActivity(
             Intent(this, MobilePlayerActivity::class.java)
                 .putExtra(MobilePlayerActivity.EXTRA_ITEM_ID, item.id.toString())
         )
-    }
-
-    override fun onDestroy() {
-        if (::castManager.isInitialized) castManager.destroy()
-        super.onDestroy()
     }
 }
 
