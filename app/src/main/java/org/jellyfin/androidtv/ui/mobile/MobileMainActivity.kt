@@ -1878,22 +1878,65 @@ private fun GenreChip(
 private fun SearchBrowse(
     state: MobileHomeState,
     api: ApiClient,
+    seerrConfigured: Boolean,
+    onSeerrSearch: suspend (String) -> List<SeerrSearchResult>,
+    onSeerrRequest: suspend (SeerrSearchResult) -> String?,
     onSelect: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
     expanded: Boolean,
 ) {
     var query by remember { mutableStateOf("") }
+    var seerrResults by remember { mutableStateOf<List<SeerrSearchResult>>(emptyList()) }
+    var seerrLoading by remember { mutableStateOf(false) }
+    var seerrError by remember { mutableStateOf<String?>(null) }
+    var seerrRefresh by remember { mutableStateOf(0) }
+
     val all = remember(state) {
         (state.continueWatching + state.myV + state.movies + state.shows)
             .distinctBy { it.id }
     }
-    val results = if (query.isBlank()) all else all.filter { item ->
+    val localResults = if (query.isBlank()) all else all.filter { item ->
         val haystack = listOfNotNull(
             item.name,
             item.seriesName,
             item.productionYear?.toString(),
         ).joinToString(" ").lowercase()
         haystack.contains(query.trim().lowercase())
+    }
+    val localTmdbKeys = remember(all) {
+        all.mapNotNull { item ->
+            val mediaType = when (item.type) {
+                BaseItemKind.MOVIE -> "movie"
+                BaseItemKind.SERIES -> "tv"
+                else -> null
+            }
+            val tmdbId = item.tmdbId()
+            if (mediaType != null && tmdbId != null) "${mediaType}:${tmdbId}" else null
+        }.toSet()
+    }
+    val remoteResults = seerrResults.filterNot {
+        "${it.mediaType}:${it.tmdbId}" in localTmdbKeys
+    }
+
+    LaunchedEffect(query, seerrConfigured, seerrRefresh) {
+        val cleanQuery = query.trim()
+        if (!seerrConfigured || cleanQuery.length < 2) {
+            seerrResults = emptyList()
+            seerrLoading = false
+            seerrError = null
+            return@LaunchedEffect
+        }
+
+        delay(450)
+        seerrLoading = true
+        seerrError = null
+        runCatching { onSeerrSearch(cleanQuery) }
+            .onSuccess { seerrResults = it }
+            .onFailure {
+                seerrResults = emptyList()
+                seerrError = it.message ?: "Couldn't reach Seerr."
+            }
+        seerrLoading = false
     }
 
     Column(
@@ -1917,7 +1960,7 @@ private fun SearchBrowse(
         ) {
             if (query.isBlank()) {
                 BasicText(
-                    "Movies and TV shows",
+                    if (seerrConfigured) "Search your library and Seerr" else "Movies and TV shows",
                     style = TextStyle(color = Color(0xFF657482), fontSize = 16.sp),
                 )
             }
@@ -1943,9 +1986,209 @@ private fun SearchBrowse(
             horizontalArrangement = Arrangement.spacedBy(11.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            gridItems(results, key = { it.id }) { item ->
-                GridMediaCard(item, api, onSelect, onToggleFavorite)
+            if (query.isBlank()) {
+                gridItems(localResults, key = { it.id }) { item ->
+                    GridMediaCard(item, api, onSelect, onToggleFavorite)
+                }
+            } else {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    SearchSectionHeader(
+                        title = "In your library",
+                        subtitle = if (localResults.isEmpty()) "No local matches" else "${localResults.size} found",
+                    )
+                }
+
+                gridItems(localResults, key = { "local-${it.id}" }) { item ->
+                    GridMediaCard(item, api, onSelect, onToggleFavorite)
+                }
+
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    SearchSectionHeader(
+                        title = "Request with Seerr",
+                        subtitle = when {
+                            !seerrConfigured -> "Connect Seerr in Settings"
+                            seerrLoading -> "Searching…"
+                            seerrError != null -> seerrError.orEmpty()
+                            remoteResults.isEmpty() && query.trim().length >= 2 -> "No additional matches"
+                            else -> "${remoteResults.size} found"
+                        },
+                    )
+                }
+
+                if (seerrConfigured && !seerrLoading && seerrError == null) {
+                    gridItems(
+                        remoteResults,
+                        key = { "seerr-${it.mediaType}-${it.tmdbId}" },
+                    ) { item ->
+                        SeerrMediaCard(
+                            item = item,
+                            onRequest = onSeerrRequest,
+                            onRequested = { seerrRefresh++ },
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchSectionHeader(
+    title: String,
+    subtitle: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 2.dp),
+    ) {
+        BasicText(
+            title,
+            style = TextStyle(
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
+        BasicText(
+            subtitle,
+            style = TextStyle(
+                color = Color(0xFF7F8D9A),
+                fontSize = 11.sp,
+            ),
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun SeerrMediaCard(
+    item: SeerrSearchResult,
+    onRequest: suspend (SeerrSearchResult) -> String?,
+    onRequested: () -> Unit,
+) {
+    var mediaStatus by remember(item.tmdbId, item.mediaType, item.mediaStatus) {
+        mutableStateOf(item.mediaStatus)
+    }
+    var requesting by remember(item.tmdbId, item.mediaType) { mutableStateOf(false) }
+    var message by remember(item.tmdbId, item.mediaType) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    val statusLabel = when (mediaStatus) {
+        SEERR_STATUS_PENDING -> "Requested"
+        SEERR_STATUS_PROCESSING -> "Processing"
+        SEERR_STATUS_PARTIALLY_AVAILABLE -> "Partially available"
+        SEERR_STATUS_AVAILABLE -> "Available"
+        SEERR_STATUS_BLOCKLISTED -> "Blocked"
+        else -> "Request"
+    }
+    val requestEnabled =
+        !requesting && (mediaStatus == SEERR_STATUS_UNKNOWN || mediaStatus == SEERR_STATUS_DELETED)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF111A23)),
+        ) {
+            AsyncImage(
+                modifier = Modifier.fillMaxSize(),
+                url = item.posterUrl,
+                scaleType = ImageView.ScaleType.CENTER_CROP,
+            )
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xCC05080C))
+                    .padding(horizontal = 7.dp, vertical = 4.dp),
+            ) {
+                BasicText(
+                    "SEERR",
+                    style = TextStyle(
+                        color = Color(0xFFBDEBFF),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                    ),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+        BasicText(
+            item.title,
+            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+            maxLines = 1,
+        )
+        BasicText(
+            listOfNotNull(
+                item.year?.toString(),
+                if (item.mediaType == "movie") "Movie" else "TV",
+            ).joinToString(" • "),
+            style = TextStyle(color = Color(0xFF7F8D9A), fontSize = 11.sp),
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(6.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(9.dp))
+                .background(
+                    when {
+                        mediaStatus == SEERR_STATUS_AVAILABLE -> Color(0xFF163224)
+                        requestEnabled -> Color(0xFFEAF6FC)
+                        else -> Color(0xFF17232D)
+                    }
+                )
+                .clickable(enabled = requestEnabled) {
+                    requesting = true
+                    message = null
+                    scope.launch {
+                        val error = onRequest(item)
+                        requesting = false
+                        if (error == null || error == "Already requested.") {
+                            mediaStatus = SEERR_STATUS_PENDING
+                            message = if (error == null) "Requested" else error
+                            onRequested()
+                        } else {
+                            message = error
+                        }
+                    }
+                }
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                if (requesting) "Requesting…" else statusLabel,
+                style = TextStyle(
+                    color = if (requestEnabled) Color(0xFF071017) else Color(0xFFD4DDE5),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                maxLines = 1,
+            )
+        }
+
+        if (!message.isNullOrBlank()) {
+            Spacer(Modifier.height(4.dp))
+            BasicText(
+                message.orEmpty(),
+                style = TextStyle(
+                    color = if (message == "Requested" || message == "Already requested.") {
+                        Color(0xFF8EDCB2)
+                    } else {
+                        Color(0xFFFFA6A6)
+                    },
+                    fontSize = 9.sp,
+                ),
+                maxLines = 2,
+            )
         }
     }
 }
