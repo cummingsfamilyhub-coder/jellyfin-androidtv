@@ -603,19 +603,19 @@ private fun serviceDisplayName(name: String?): String =
 private fun serviceLogoUrl(name: String?): String? {
     val normalized = serviceDisplayName(name).trim().lowercase()
     val path = when {
-        normalized.contains("netflix") -> "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg"
-        normalized.contains("disney") -> "/97yvRBw1GzX7fXprcF80er19ot.jpg"
+        normalized.contains("netflix") -> "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"
+        normalized.contains("disney") -> "/1edZOYAfoyZyZ3rklNSiUpXX30Q.png"
         normalized.contains("amazon") || normalized.contains("prime") ->
-            "/pvske1MyAoymrs5bguRfVqYiM9a.jpg"
-        normalized.contains("apple") -> "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg"
+            "/w7HfLNm9CWwRmAMU58udl2L7We7.png"
+        normalized.contains("apple") -> "/bngHRFi794mnMq34gfVcm9nDxN1.png"
         normalized == "max" || normalized.contains("hbo") ->
-            "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg"
-        normalized.contains("paramount") -> "/fi83B1oztoS47xxcemFd8zbYD6z.jpg"
+            "/rAb4M1LjGpWASxpk6Va791A7Nkw.png"
+        normalized.contains("paramount") -> "/fi83B1oztoS47xxcemFdPMhIzK.png"
         normalized.contains("iplayer") -> "/nc8Tpsr8SqCbsTUogPDD06gGzB3.jpg"
         normalized.contains("itvx") -> "/1LuvKw01c2KQCt6DqgAgR06H2pT.jpg"
         normalized.startsWith("now") -> "/y7mZSw1FV99yfawxOISBQTvtJxM.jpg"
-        normalized.contains("hulu") -> "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg"
-        normalized.contains("peacock") -> "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg"
+        normalized.contains("hulu") -> "/pqUTCleNUiTLAVlelGxUgWn1ELh.png"
+        normalized.contains("peacock") -> "/gIAcGTjKKr0KOHL5s4O36roJ8p7.png"
         else -> null
     }
     return path?.let { "https://image.tmdb.org/t/p/w300$it" }
@@ -1289,7 +1289,7 @@ private fun ProviderWordmark(
             AsyncImage(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 30.dp, vertical = 20.dp),
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
                 url = logoUrl,
                 scaleType = ImageView.ScaleType.FIT_CENTER,
             )
