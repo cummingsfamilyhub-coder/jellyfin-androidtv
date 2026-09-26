@@ -49,15 +49,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.jellyfin.androidtv.auth.repository.ServerRepository
-import org.jellyfin.androidtv.auth.repository.SessionRepository
-import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.data.repository.ItemRepository
 import org.jellyfin.androidtv.ui.player.base.PlayerSubtitles
 import org.jellyfin.androidtv.ui.player.base.PlayerSurface
 import org.jellyfin.androidtv.ui.composable.rememberQueueEntry
-import org.jellyfin.androidtv.ui.mobile.cast.VesperCastButton
-import org.jellyfin.androidtv.ui.mobile.cast.VesperCastManager
 import org.jellyfin.androidtv.ui.playback.segment.MediaSegmentRepository
 import org.jellyfin.androidtv.ui.playback.rewrite.RewriteMediaManager
 import org.jellyfin.playback.core.PlaybackManager
@@ -87,10 +82,6 @@ class MobilePlayerActivity : FragmentActivity() {
 
     private val api by inject<ApiClient>()
     private val playbackManager by inject<PlaybackManager>()
-    private val sessionRepository by inject<SessionRepository>()
-    private val serverRepository by inject<ServerRepository>()
-    private val userRepository by inject<UserRepository>()
-    private lateinit var castManager: VesperCastManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -102,29 +93,10 @@ class MobilePlayerActivity : FragmentActivity() {
             return
         }
 
-        castManager = VesperCastManager(
-            activity = this,
-            api = api,
-            sessionRepository = sessionRepository,
-            serverRepository = serverRepository,
-        )
-        castManager.updateReceiverApplicationId(
-            userRepository.currentUser.value?.configuration?.castReceiverId
-        )
-        castManager.onRemotePlaybackStarted = {
-            runOnUiThread {
-                playbackManager.state.stop()
-                finish()
-            }
-        }
-
         setContent {
             MobilePlayer(
                 playbackManager = playbackManager,
                 onClose = ::closePlayer,
-                onPrepareCast = { item, startPositionTicks ->
-                    castManager.prepareHandoff(item, startPositionTicks)
-                },
             )
         }
 
@@ -215,7 +187,6 @@ class MobilePlayerActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
-        if (::castManager.isInitialized) castManager.destroy()
         if (isFinishing) playbackManager.state.stop()
         super.onDestroy()
     }
@@ -225,7 +196,6 @@ class MobilePlayerActivity : FragmentActivity() {
 private fun MobilePlayer(
     playbackManager: PlaybackManager,
     onClose: () -> Unit,
-    onPrepareCast: (BaseItemDto, Long) -> Unit,
 ) {
     var controlsVisible by remember { mutableStateOf(true) }
     var positionMs by remember { mutableLongStateOf(0L) }
@@ -319,26 +289,6 @@ private fun MobilePlayer(
                 onClick = onClose,
                 modifier = Modifier.align(Alignment.TopStart).padding(18.dp),
             )
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(18.dp)
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(23.dp))
-                    .background(Color(0x99000000)),
-                contentAlignment = Alignment.Center,
-            ) {
-                VesperCastButton(
-                    modifier = Modifier.size(42.dp),
-                    onBeforeShowDialog = {
-                        currentItem?.let { item ->
-                            val handoffMs = if (scrubbing) scrubMs else positionMs
-                            onPrepareCast(item, handoffMs.coerceAtLeast(0L) * 10_000L)
-                        }
-                    },
-                )
-            }
 
             if (currentIntro != null) {
                 PlayerButton(
