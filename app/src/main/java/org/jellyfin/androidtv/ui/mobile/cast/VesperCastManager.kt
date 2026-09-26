@@ -27,6 +27,8 @@ class VesperCastManager(
     private val handler = Handler(Looper.getMainLooper())
     private var receiverReady = false
     private var pendingItem: BaseItemDto? = null
+    private var lastRequestedItem: BaseItemDto? = null
+    private var compatibilityRetryCount = 0
 
     private val castContext: CastContext by lazy {
         CastContext.getSharedInstance(activity)
@@ -100,6 +102,9 @@ class VesperCastManager(
      * silently fall back to local playback while the receiver is starting.
      */
     fun play(item: BaseItemDto): Boolean {
+        lastRequestedItem = item
+        compatibilityRetryCount = 0
+
         val castSession = castContext.sessionManager.currentCastSession
         val castIsStarting = castContext.castState == CastState.CONNECTING
 
@@ -255,9 +260,28 @@ class VesperCastManager(
                         receiverReady = false
                         showToast("Chromecast couldn't reach your Jellyfin server.")
                     }
-                    "playbackerror" -> showToast(
-                        "Chromecast playback error: " + receiverMessage(message)
-                    )
+                    "playbackerror" -> {
+                        val detail = receiverMessage(message)
+                        if (
+                            detail.equals("NoCompatibleStream", ignoreCase = true) &&
+                            compatibilityRetryCount < MAX_COMPATIBILITY_RETRIES
+                        ) {
+                            compatibilityRetryCount++
+                            receiverReady = false
+                            val item = lastRequestedItem
+                            if (item != null) {
+                                handler.postDelayed({
+                                    val activeSession = castContext.sessionManager.currentCastSession
+                                        ?.takeIf { it.isConnected }
+                                        ?: return@postDelayed
+                                    receiverReady = true
+                                    sendPlay(activeSession, item)
+                                }, COMPATIBILITY_RETRY_DELAY_MS)
+                            }
+                        } else {
+                            showToast("Chromecast playback error: $detail")
+                        }
+                    }
                     "error" -> showToast(
                         "Chromecast error: " + receiverMessage(message)
                     )
@@ -290,9 +314,7 @@ class VesperCastManager(
         }
 
         session.sendMessage(NAMESPACE, message).setResultCallback { result ->
-            if (result.isSuccess) {
-                receiverReady = true
-            } else if (attemptsLeft > 1) {
+            if (!result.isSuccess && attemptsLeft > 1) {
                 receiverReady = false
                 handler.postDelayed({
                     sendIdentify(session)
@@ -367,7 +389,9 @@ class VesperCastManager(
 
     companion object {
         const val NAMESPACE = "urn:x-cast:com.connectsdk"
-        private const val RECEIVER_WARMUP_MS = 900L
-        private const val RETRY_DELAY_MS = 400L
+        private const val RECEIVER_WARMUP_MS = 2500L
+        private const val RETRY_DELAY_MS = 500L
+        private const val COMPATIBILITY_RETRY_DELAY_MS = 2200L
+        private const val MAX_COMPATIBILITY_RETRIES = 2
     }
 }
