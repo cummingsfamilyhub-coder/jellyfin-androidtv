@@ -1,0 +1,92 @@
+name: Build Vesper Mobile Debug APK
+
+on:
+  push:
+    branches:
+      - vesper
+    paths:
+      - ".github/workflows/vesper-mobile-build.yml"
+      - "app/**"
+      - "VESPER.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Prepare Android SDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Apply mobile variant
+        shell: python
+        run: |
+          from pathlib import Path
+
+          build = Path("app/build.gradle.kts")
+          text = build.read_text(encoding="utf-8")
+          text = text.replace("app.vesper.androidtv", "app.vesper.mobile")
+          text = text.replace('base.archivesName.set("vesper-v${project.getVersionName()}")',
+                              'base.archivesName.set("vesper-mobile-v${project.getVersionName()}")')
+          build.write_text(text, encoding="utf-8")
+
+          strings = Path("app/src/main/res/values/strings.xml")
+          text = strings.read_text(encoding="utf-8")
+          text = text.replace(
+              '<string name="app_name_release" translatable="false" tools:ignore="UnusedResources">Vesper</string>',
+              '<string name="app_name_release" translatable="false" tools:ignore="UnusedResources">Vesper Mobile</string>'
+          )
+          text = text.replace(
+              '<string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Vesper</string>',
+              '<string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Vesper Mobile</string>'
+          )
+          strings.write_text(text, encoding="utf-8")
+
+          prefs = Path("app/src/main/java/org/jellyfin/androidtv/preference/SystemPreferences.kt")
+          text = prefs.read_text(encoding="utf-8")
+          text = text.replace(
+              'booleanPreference("disable_ui_mode_warning", false)',
+              'booleanPreference("disable_ui_mode_warning", true)'
+          )
+          prefs.write_text(text, encoding="utf-8")
+
+          manifest = Path("app/src/main/AndroidManifest.xml")
+          text = manifest.read_text(encoding="utf-8")
+          text = text.replace(
+              '                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />\n',
+              ''
+          )
+          manifest.write_text(text, encoding="utf-8")
+
+      - name: Build mobile debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Collect APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/*.apk dist/Vesper-mobile-debug.apk
+          ls -lh dist/Vesper-mobile-debug.apk
+
+      - name: Upload Vesper Mobile APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vesper-mobile-debug-apk
+          path: dist/Vesper-mobile-debug.apk
+          if-no-files-found: error
+          retention-days: 30
