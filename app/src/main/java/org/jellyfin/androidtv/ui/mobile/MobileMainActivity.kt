@@ -1,6 +1,8 @@
 package org.jellyfin.androidtv.ui.mobile
 
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.widget.EditText
 import android.text.InputType
 import android.app.AlertDialog
@@ -14,6 +16,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.VesperServiceConfig
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Brush
@@ -93,6 +96,10 @@ import java.nio.charset.StandardCharsets
 import java.net.URLEncoder
 import java.net.URL
 import java.net.HttpURLConnection
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -107,7 +114,6 @@ class MobileMainActivity : FragmentActivity() {
     private var popularity by mutableStateOf(PopularityState())
     private var selected by mutableStateOf<BaseItemDto?>(null)
     private var tmdbApiKey by mutableStateOf("")
-    private var seerrUrl by mutableStateOf("")
     private var seerrApiKey by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
 
@@ -124,12 +130,12 @@ class MobileMainActivity : FragmentActivity() {
         tmdbApiKey = vesperPreferences
             .getString("tmdb_api_key", "")
             .orEmpty()
-        seerrUrl = vesperPreferences
-            .getString("seerr_url", "")
-            .orEmpty()
         seerrApiKey = vesperPreferences
             .getString("seerr_api_key", "")
             .orEmpty()
+        if (vesperPreferences.contains("seerr_url")) {
+            vesperPreferences.edit().remove("seerr_url").apply()
+        }
         popularityScope = runCatching {
             PopularityScope.valueOf(
                 vesperPreferences.getString("popularity_scope", PopularityScope.GLOBAL.name)
@@ -146,7 +152,7 @@ class MobileMainActivity : FragmentActivity() {
                 selected = selected,
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
                 api = api,
-                seerrConfigured = seerrUrl.isNotBlank() && seerrApiKey.isNotBlank(),
+                seerrConfigured = seerrApiKey.isNotBlank(),
                 onSeerrSearch = ::searchSeerr,
                 onSeerrRequest = ::requestSeerr,
                 onSelect = { selected = it },
@@ -237,7 +243,7 @@ class MobileMainActivity : FragmentActivity() {
                     )
                 }
             }.getOrElse { error ->
-                MobileHomeState(error = error.message ?: error::class.java.simpleName)
+                MobileHomeState(error = friendlyServiceError("Jellyfin", error))
             }
             if (state.error == null) loadPopularity()
         }
@@ -288,8 +294,8 @@ class MobileMainActivity : FragmentActivity() {
         val url = URL("${serverAddress.trimEnd('/')}/user_usage_stats/$endpoint?days=30")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 5000
-            readTimeout = 10000
+            connectTimeout = VesperServiceConfig.CONNECT_TIMEOUT_MS
+            readTimeout = VesperServiceConfig.READ_TIMEOUT_MS
             setRequestProperty("X-Emby-Token", token)
             setRequestProperty("Accept", "application/json")
         }
@@ -382,6 +388,40 @@ class MobileMainActivity : FragmentActivity() {
         finish()
     }
 
+    private fun isNetworkAvailable(): Boolean {
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        val network = connectivity.activeNetwork ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun friendlyServiceError(service: String, error: Throwable): String {
+        if (!isNetworkAvailable()) return "No network connection. Check Wi-Fi or mobile data and try again."
+
+        val details = generateSequence(error as Throwable?) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString(" ")
+            .lowercase()
+
+        return when {
+            error is SocketTimeoutException || details.contains("timeout") ->
+                "$service timed out. Try again."
+            details.contains("401") || details.contains("unauthorized") ||
+                (details.contains("authentication") && details.contains("expired")) ->
+                "$service authentication has expired. Sign in again."
+            error is UnknownHostException || error is ConnectException || error is SSLException ->
+                "$service is unreachable. Check your connection and try again."
+            else -> "$service is unavailable right now. Try again."
+        }
+    }
+
+    private fun seerrHttpError(status: Int): String = when (status) {
+        401, 403 -> "Seerr authentication failed. Check the API key in Settings."
+        408 -> "Seerr timed out. Try again."
+        in 500..599 -> "Seerr is unavailable right now. Try again."
+        else -> "Seerr request failed. Try again."
+    }
+
     private fun encodeSeerrQueryValue(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8.name())
             .replace("+", "%20")
@@ -389,10 +429,10 @@ class MobileMainActivity : FragmentActivity() {
 
     private suspend fun searchSeerr(query: String): List<SeerrSearchResult> =
         withContext(Dispatchers.IO) {
-            val baseUrl = seerrUrl.trim().trimEnd('/')
+            val baseUrl = VesperServiceConfig.SEERR_BASE_URL
             val apiKey = seerrApiKey.trim()
             val cleanQuery = query.trim()
-            if (baseUrl.isBlank() || apiKey.isBlank() || cleanQuery.length < 2) {
+            if (apiKey.isBlank() || cleanQuery.length < 2) {
                 return@withContext emptyList()
             }
 
@@ -400,8 +440,8 @@ class MobileMainActivity : FragmentActivity() {
             val url = URL("${baseUrl}/api/v1/search?query=${encodedQuery}&page=1")
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 5000
-                readTimeout = 10000
+                connectTimeout = VesperServiceConfig.CONNECT_TIMEOUT_MS
+                readTimeout = VesperServiceConfig.READ_TIMEOUT_MS
                 setRequestProperty("X-Api-Key", apiKey)
                 setRequestProperty("Accept", "application/json")
             }
@@ -416,7 +456,8 @@ class MobileMainActivity : FragmentActivity() {
                         }
                         .orEmpty()
                     throw IllegalStateException(
-                        message.ifBlank { "Seerr returned HTTP ${connection.responseCode}" }
+                        message.takeIf { it.isNotBlank() && connection.responseCode !in listOf(401, 403) }
+                            ?: seerrHttpError(connection.responseCode)
                     )
                 }
 
@@ -463,6 +504,11 @@ class MobileMainActivity : FragmentActivity() {
                         )
                     }
                 }
+            } catch (error: Exception) {
+                if (error is IllegalStateException && error.message?.startsWith("Seerr ") == true) {
+                    throw error
+                }
+                throw IllegalStateException(friendlyServiceError("Seerr", error), error)
             } finally {
                 connection.disconnect()
             }
@@ -470,17 +516,17 @@ class MobileMainActivity : FragmentActivity() {
 
     private suspend fun requestSeerr(item: SeerrSearchResult): String? =
         withContext(Dispatchers.IO) {
-            val baseUrl = seerrUrl.trim().trimEnd('/')
+            val baseUrl = VesperServiceConfig.SEERR_BASE_URL
             val apiKey = seerrApiKey.trim()
-            if (baseUrl.isBlank() || apiKey.isBlank()) {
-                return@withContext "Configure Seerr in Vesper settings first."
+            if (apiKey.isBlank()) {
+                return@withContext "Add the Seerr API key in Vesper settings first."
             }
 
             val connection = (URL("${baseUrl}/api/v1/request").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
-                connectTimeout = 5000
-                readTimeout = 15000
+                connectTimeout = VesperServiceConfig.CONNECT_TIMEOUT_MS
+                readTimeout = VesperServiceConfig.REQUEST_READ_TIMEOUT_MS
                 setRequestProperty("X-Api-Key", apiKey)
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
@@ -502,17 +548,10 @@ class MobileMainActivity : FragmentActivity() {
                     200, 201 -> null
                     202 -> "No new seasons are available to request."
                     409 -> "Already requested."
-                    else -> {
-                        val body = connection.errorStream
-                            ?.bufferedReader()
-                            ?.use { it.readText() }
-                            .orEmpty()
-                        runCatching { JSONObject(body).optString("message") }
-                            .getOrNull()
-                            ?.takeIf { it.isNotBlank() }
-                            ?: "Seerr returned HTTP ${connection.responseCode}"
-                    }
+                    else -> seerrHttpError(connection.responseCode)
                 }
+            } catch (error: Exception) {
+                friendlyServiceError("Seerr", error)
             } finally {
                 connection.disconnect()
             }
@@ -571,19 +610,17 @@ class MobileMainActivity : FragmentActivity() {
         container.addView(input)
 
         container.addView(TextView(this).apply {
-            text = "Seerr URL"
+            text = "Seerr service"
             textSize = 15f
             setPadding(0, dp(14), 0, dp(4))
         })
 
-        val seerrUrlInput = EditText(this).apply {
-            setText(seerrUrl)
-            hint = "http://your-seerr:5055"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setSelectAllOnFocus(false)
-            setSingleLine(true)
-        }
-        container.addView(seerrUrlInput)
+        container.addView(TextView(this).apply {
+            text = VesperServiceConfig.SEERR_BASE_URL
+            textSize = 13f
+            alpha = 0.72f
+            setPadding(0, 0, 0, dp(6))
+        })
 
         container.addView(TextView(this).apply {
             text = "Seerr API key"
@@ -612,7 +649,6 @@ class MobileMainActivity : FragmentActivity() {
             .setView(container)
             .setPositiveButton("Save") { _, _ ->
                 tmdbApiKey = input.text?.toString()?.trim().orEmpty()
-                seerrUrl = seerrUrlInput.text?.toString()?.trim()?.trimEnd('/').orEmpty()
                 seerrApiKey = seerrKeyInput.text?.toString()?.trim().orEmpty()
                 popularityScope = if (localRadio.isChecked) {
                     PopularityScope.LOCAL
@@ -623,7 +659,7 @@ class MobileMainActivity : FragmentActivity() {
                 getSharedPreferences("vesper", MODE_PRIVATE)
                     .edit()
                     .putString("tmdb_api_key", tmdbApiKey)
-                    .putString("seerr_url", seerrUrl)
+                    .remove("seerr_url")
                     .putString("seerr_api_key", seerrApiKey)
                     .putString("popularity_scope", popularityScope.name)
                     .apply()
