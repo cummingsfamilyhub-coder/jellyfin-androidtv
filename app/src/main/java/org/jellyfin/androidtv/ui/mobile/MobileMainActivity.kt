@@ -217,6 +217,16 @@ class MobileMainActivity : FragmentActivity() {
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
+                    val serviceBoxSets = async {
+                        api.itemsApi.getItems(
+                            fields = emptySet(),
+                            includeItemTypes = setOf(BaseItemKind.BOX_SET),
+                            recursive = true,
+                            imageTypeLimit = 0,
+                            limit = 1000,
+                            sortBy = setOf(ItemSortBy.SORT_NAME),
+                        ).content.items
+                    }
                     val boxSets = async {
                         api.itemsApi.getItems(
                             fields = ItemRepository.browseFields,
@@ -228,15 +238,16 @@ class MobileMainActivity : FragmentActivity() {
                         ).content.items
                     }
 
+                    val allServiceCollections = serviceBoxSets.await()
                     val allCollections = boxSets.await()
                     MobileHomeState(
                         continueWatching = resume.await().filterNot(::isServiceArtifact),
                         myV = favorites.await().filterNot(::isServiceArtifact),
                         movies = movies.await().filterNot(::isServiceArtifact),
                         shows = shows.await().filterNot(::isServiceArtifact),
-                        services = allCollections
-                            .filter(::isServiceCollection)
-                            .sortedBy(::serviceSortOrder),
+                        services = serviceOrder.mapNotNull { key ->
+                            allServiceCollections.firstOrNull { serviceKey(it.name) == key }
+                        },
                         collections = allCollections.filterNot(::isServiceCollection),
                     )
                 }
@@ -900,7 +911,7 @@ private fun isServiceArtifact(item: BaseItemDto): Boolean =
 
 private fun serviceDisplayName(name: String?): String = when (serviceKey(name)) {
     "netflix" -> "Netflix"
-    "prime" -> "Prime Video"
+    "prime" -> "prime video"
     "disney" -> "Disney+"
     "apple" -> "Apple TV+"
     "paramount" -> "Paramount+"
@@ -919,8 +930,8 @@ private fun serviceSortOrder(item: BaseItemDto): Int {
 }
 
 private fun serviceLogoResource(name: String?): Int? = when (serviceKey(name)) {
-    "prime" -> R.drawable.logo_primevideo
     "disney" -> R.drawable.logo_disneyplus
+    "max" -> R.drawable.logo_hbomax
     else -> null
 }
 
@@ -1571,7 +1582,7 @@ private fun ProviderWordmark(
     val foreground = when (key) {
         "netflix" -> Color(0xFFE50914)
         "paramount" -> Color.White
-        "max" -> Color(0xFF4976FF)
+        "max" -> Color.White
         "now" -> Color(0xFF00FF85)
         "iplayer" -> Color(0xFFFF4B8B)
         "itvx" -> Color(0xFFFFE600)
@@ -1614,7 +1625,10 @@ private fun ProviderWordmark(
                     contentDescription = displayName,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                        .padding(
+                            horizontal = if (key == "max") 32.dp else 24.dp,
+                            vertical = if (key == "max") 26.dp else 20.dp,
+                        ),
                     contentScale = ContentScale.Fit,
                 )
             }
@@ -1635,7 +1649,7 @@ private fun ProviderWordmark(
                     style = TextStyle(
                         color = foreground,
                         fontSize = size,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = if (key == "prime") FontWeight.SemiBold else FontWeight.Black,
                         letterSpacing = if (key == "netflix") 1.2.sp else 0.sp,
                     ),
                     maxLines = 1,
