@@ -87,11 +87,26 @@ class MobileStartupActivity : FragmentActivity() {
 
         val switchServerId = intent.getStringExtra(EXTRA_SWITCH_SERVER_ID)?.let(UUID::fromString)
 
-        if (switchServerId == null && sessionRepository.currentSession.value != null && userRepository.currentUser.value != null) {
-            openHome()
-            return
-        }
+        lifecycleScope.launch {
+            // SessionInitializer restores in the background, but the mobile launcher can
+            // be created before that coroutine finishes. Explicitly await restoration here
+            // so a valid saved session never falls through to the login screen.
+            if (switchServerId == null) {
+                sessionRepository.restoreSession(destroyOnly = false)
+                if (
+                    sessionRepository.currentSession.value != null &&
+                    userRepository.currentUser.value != null
+                ) {
+                    openHome()
+                    return@launch
+                }
+            }
 
+            showLogin(switchServerId)
+        }
+    }
+
+    private suspend fun showLogin(switchServerId: UUID?) {
         setContent {
             MobileLoginScreen(
                 stage = stage,
@@ -104,7 +119,7 @@ class MobileStartupActivity : FragmentActivity() {
                 busy = busy,
                 error = error,
                 storedServers = storedServers,
-                userImage = { s, u -> authenticationRepository.getUserImageUrl(s, u) },
+                userImage = { server, user -> authenticationRepository.getUserImageUrl(server, user) },
                 onAddressChange = { address = it },
                 onUsernameChange = { username = it },
                 onPasswordChange = { password = it },
@@ -123,22 +138,18 @@ class MobileStartupActivity : FragmentActivity() {
             )
         }
 
-        lifecycleScope.launch {
-            serverRepository.loadStoredServers()
-            storedServers = serverRepository.storedServers.value
+        serverRepository.loadStoredServers()
+        storedServers = serverRepository.storedServers.value
 
-            if (switchServerId != null) {
-                val target = serverRepository.getServer(switchServerId, true)
-                if (target != null) {
-                    openServer(target)
-                    return@launch
-                }
+        if (switchServerId != null) {
+            val target = serverRepository.getServer(switchServerId, true)
+            if (target != null) {
+                openServer(target)
+                return
             }
-
-            // Vesper always starts from the canonical HTTPS endpoint.
-            // Stored server entries are migrated only after their Jellyfin server ID is verified.
-            address = VesperServiceConfig.JELLYFIN_BASE_URL
         }
+
+        address = VesperServiceConfig.JELLYFIN_BASE_URL
     }
 
     private fun connect() {
