@@ -77,7 +77,8 @@ class ServerRepositoryImpl(
 	// Loading data
 	override suspend fun loadStoredServers() {
 		authenticationStore.getServers()
-			.map { (id, entry) -> entry.asServer(id) }
+			.toList()
+			.map { (id, entry) -> canonicalizeServerAddress(id, entry).asServer(id) }
 			.sortedWith(compareByDescending<Server> { it.dateLastAccessed }.thenBy { it.name })
 			.let { _storedServers.emit(it) }
 	}
