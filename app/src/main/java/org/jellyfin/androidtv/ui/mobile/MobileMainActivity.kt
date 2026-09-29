@@ -918,8 +918,10 @@ private fun serviceDisplayName(name: String?): String = when (serviceKey(name)) 
     else -> cleanedServiceName(name).ifBlank { "Streaming service" }
 }
 
-private fun serviceSortOrder(item: BaseItemDto): Int =
-    serviceOrder.indexOf(serviceKey(item.name)).let { if (it >= 0) it else Int.MAX_VALUE }
+private fun serviceSortOrder(item: BaseItemDto): Int {
+    val key = serviceKey(item.name) ?: return Int.MAX_VALUE
+    return serviceOrder.indexOf(key).let { if (it >= 0) it else Int.MAX_VALUE }
+}
 
 private fun serviceLogoResource(name: String?): Int? = when (serviceKey(name)) {
     "prime" -> R.drawable.logo_primevideo
