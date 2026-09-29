@@ -77,8 +77,7 @@ class ServerRepositoryImpl(
 	// Loading data
 	override suspend fun loadStoredServers() {
 		authenticationStore.getServers()
-			.toList()
-			.map { (id, entry) -> canonicalizeServerAddress(id, entry).asServer(id) }
+			.map { (id, entry) -> entry.asServer(id) }
 			.sortedWith(compareByDescending<Server> { it.dateLastAccessed }.thenBy { it.name })
 			.let { _storedServers.emit(it) }
 	}
@@ -247,12 +246,26 @@ class ServerRepositoryImpl(
 	}
 
 	// Helper functions
-	private fun canonicalizeServerAddress(id: UUID, server: AuthenticationStoreServer): AuthenticationStoreServer {
+	private suspend fun canonicalizeServerAddress(id: UUID, server: AuthenticationStoreServer): AuthenticationStoreServer {
 		if (server.address == VesperServiceConfig.JELLYFIN_BASE_URL) return server
 
-		return server.copy(address = VesperServiceConfig.JELLYFIN_BASE_URL).also {
-			authenticationStore.putServer(id, it)
-			Timber.i("Migrated Vesper Jellyfin server address to canonical HTTPS endpoint")
+		return try {
+			val canonicalApi = jellyfin.createApi(VesperServiceConfig.JELLYFIN_BASE_URL)
+			val canonicalInfo by canonicalApi.systemApi.getPublicSystemInfo()
+			val canonicalId = canonicalInfo.id?.toUUID()
+
+			if (canonicalId != id) {
+				Timber.w("Canonical Vesper endpoint belongs to a different Jellyfin server; stored address was not changed")
+				server
+			} else {
+				server.copy(address = VesperServiceConfig.JELLYFIN_BASE_URL).also {
+					authenticationStore.putServer(id, it)
+					Timber.i("Migrated Vesper Jellyfin server address to canonical HTTPS endpoint")
+				}
+			}
+		} catch (error: Exception) {
+			Timber.w(error, "Unable to verify canonical Vesper Jellyfin endpoint; keeping stored server address")
+			server
 		}
 	}
 
