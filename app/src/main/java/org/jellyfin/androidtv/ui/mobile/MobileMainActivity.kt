@@ -832,13 +832,8 @@ private fun serviceLogoResource(name: String?): Int? {
     val normalized = serviceDisplayName(name).trim().lowercase()
 
     return when {
-        normalized.contains("netflix") -> R.drawable.logo_netflix
         normalized.contains("disney") -> R.drawable.logo_disneyplus
-        normalized.contains("amazon") || normalized.contains("prime") -> R.drawable.logo_primevideo
         normalized.contains("apple") -> R.drawable.logo_appletv
-        normalized.contains("paramount") -> R.drawable.logo_paramountplus
-        normalized == "max" || normalized.contains("hbo") -> R.drawable.logo_max
-        normalized.startsWith("now") -> R.drawable.logo_now
         else -> null
     }
 }
@@ -1494,18 +1489,20 @@ private fun ProviderWordmark(
     }
     val foreground = when {
         normalized.contains("netflix") -> Color(0xFFE50914)
-        normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF27B7E8)
+        normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF00A8E1)
+        normalized.contains("paramount") -> Color.White
+        normalized == "max" || normalized.contains("hbo") -> Color(0xFF2D5BFF)
         normalized.startsWith("now") -> Color(0xFF00FF85)
         else -> Color.White
     }
     val size = when {
-        normalized.contains("netflix") -> 28.sp
+        normalized.contains("netflix") -> 30.sp
         normalized.contains("disney") -> 30.sp
-        normalized.contains("amazon") || normalized.contains("prime") -> 27.sp
+        normalized.contains("amazon") || normalized.contains("prime") -> 30.sp
         normalized.contains("apple") -> 28.sp
-        normalized.contains("paramount") -> 27.sp
-        normalized == "max" || normalized.contains("hbo") -> 34.sp
-        normalized.startsWith("now") -> 31.sp
+        normalized.contains("paramount") -> 28.sp
+        normalized == "max" || normalized.contains("hbo") -> 42.sp
+        normalized.startsWith("now") -> 34.sp
         else -> 24.sp
     }
 
@@ -1528,7 +1525,11 @@ private fun ProviderWordmark(
                 style = TextStyle(
                     color = foreground,
                     fontSize = size,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = if (normalized.contains("amazon") || normalized.contains("prime")) {
+                        FontWeight.SemiBold
+                    } else {
+                        FontWeight.Black
+                    },
                     letterSpacing = if (normalized.contains("netflix")) 1.2.sp else 0.sp,
                 ),
                 maxLines = 1,
