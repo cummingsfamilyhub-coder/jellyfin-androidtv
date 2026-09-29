@@ -167,17 +167,29 @@ class MobileStartupActivity : FragmentActivity() {
     }
 
     private fun openServer(value: Server) {
-        server = value
-        address = value.address
+        // Vesper mobile always authenticates against the canonical HTTPS endpoint.
+        // Stored users are still matched by Jellyfin server ID, but an old LAN address
+        // must never leak back into the mobile login path.
+        val canonicalServer = value.copy(address = VesperServiceConfig.JELLYFIN_BASE_URL)
+
+        server = canonicalServer
+        address = canonicalServer.address
         busy = true
         error = null
         stage = LoginStage.USERS
 
         lifecycleScope.launch {
-            val stored = serverUserRepository.getStoredServerUsers(value)
-            val storedIds = stored.map { it.id }.toSet()
-            val public = serverUserRepository.getPublicServerUsers(value).filterNot { it.id in storedIds }
-            users = stored + public
+            runCatching {
+                val stored = serverUserRepository.getStoredServerUsers(canonicalServer)
+                val storedIds = stored.map { it.id }.toSet()
+                val public = serverUserRepository.getPublicServerUsers(canonicalServer)
+                    .filterNot { it.id in storedIds }
+                stored + public
+            }.onSuccess {
+                users = it
+            }.onFailure {
+                error = "Jellyfin is unreachable. Check your connection and try again."
+            }
             busy = false
         }
     }
@@ -205,10 +217,13 @@ class MobileStartupActivity : FragmentActivity() {
                         busy = false
                         error = "This Jellyfin server version isn't supported."
                     }
-                    ServerUnavailableState,
+                    ServerUnavailableState -> {
+                        busy = false
+                        error = "The Jellyfin server isn't reachable."
+                    }
                     is ApiClientErrorLoginState -> {
                         busy = false
-                        error = "Couldn't sign in as ${user.name}."
+                        error = "Couldn't sign in to Jellyfin. Check your connection and try again."
                     }
                     AuthenticatingState -> busy = true
                 }
@@ -254,7 +269,20 @@ class MobileStartupActivity : FragmentActivity() {
                         busy = false
                         error = "The Jellyfin server isn't reachable."
                     }
-                    is ApiClientErrorLoginState,
+                    is ApiClientErrorLoginState -> {
+                        busy = false
+                        val details = state.error.message.orEmpty().lowercase()
+                        error = if (
+                            details.contains("401") ||
+                            details.contains("unauthorized") ||
+                            details.contains("invalid username") ||
+                            details.contains("invalid password")
+                        ) {
+                            "Username or password wasn't accepted."
+                        } else {
+                            "Couldn't sign in to Jellyfin. Check your connection and try again."
+                        }
+                    }
                     RequireSignInState -> {
                         busy = false
                         error = "Username or password wasn't accepted."
