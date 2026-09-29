@@ -117,6 +117,8 @@ class MobileMainActivity : FragmentActivity() {
     private var tmdbApiKey by mutableStateOf("")
     private var seerrApiKey by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
+    private val hydratedTabs = mutableSetOf<MobileTab>()
+    private val loadingTabs = mutableSetOf<MobileTab>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -154,6 +156,7 @@ class MobileMainActivity : FragmentActivity() {
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
                 api = api,
                 seerrConfigured = seerrApiKey.isNotBlank(),
+                onLibrarySearch = ::searchLibrary,
                 onSeerrSearch = ::searchSeerr,
                 onSeerrRequest = ::requestSeerr,
                 onSelect = { selected = it },
@@ -162,6 +165,7 @@ class MobileMainActivity : FragmentActivity() {
                 onPlay = ::playItem,
                 onToggleFavorite = ::toggleFavorite,
                 onSwitchProfile = ::switchProfile,
+                onTabSelected = ::loadLibraryTab,
                 onSettings = ::openSettings,
             )
         }
@@ -170,6 +174,8 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun loadHome() {
+        hydratedTabs.clear()
+        loadingTabs.clear()
         state = MobileHomeState(loading = true)
         lifecycleScope.launch {
             state = runCatching {
@@ -258,17 +264,40 @@ class MobileMainActivity : FragmentActivity() {
 
             if (state.error == null) {
                 loadPopularity()
-                hydrateLibrary()
             }
         }
     }
 
-    private fun hydrateLibrary() {
+    private fun loadLibraryTab(tab: MobileTab) {
+        if (tab !in setOf(MobileTab.MOVIES, MobileTab.TV, MobileTab.MYV)) return
+        if (tab in hydratedTabs || tab in loadingTabs) return
+
+        loadingTabs += tab
         lifecycleScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val favorites = async {
-                        api.itemsApi.getItems(
+                    when (tab) {
+                        MobileTab.MOVIES -> api.itemsApi.getItems(
+                            fields = ItemRepository.browseFields,
+                            includeItemTypes = setOf(BaseItemKind.MOVIE),
+                            recursive = true,
+                            imageTypeLimit = 1,
+                            limit = 500,
+                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
+                            sortOrder = setOf(SortOrder.DESCENDING),
+                        ).content.items.filterNot(::isServiceArtifact)
+
+                        MobileTab.TV -> api.itemsApi.getItems(
+                            fields = ItemRepository.browseFields,
+                            includeItemTypes = setOf(BaseItemKind.SERIES),
+                            recursive = true,
+                            imageTypeLimit = 1,
+                            limit = 500,
+                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
+                            sortOrder = setOf(SortOrder.DESCENDING),
+                        ).content.items.filterNot(::isServiceArtifact)
+
+                        MobileTab.MYV -> api.itemsApi.getItems(
                             fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
                             recursive = true,
@@ -277,45 +306,42 @@ class MobileMainActivity : FragmentActivity() {
                             limit = 500,
                             sortBy = setOf(ItemSortBy.PLAY_COUNT),
                             sortOrder = setOf(SortOrder.DESCENDING),
-                        ).content.items
+                        ).content.items.filterNot(::isServiceArtifact)
+
+                        else -> emptyList()
                     }
-                    val movies = async {
-                        api.itemsApi.getItems(
-                            fields = ItemRepository.browseFields,
-                            includeItemTypes = setOf(BaseItemKind.MOVIE),
-                            recursive = true,
-                            imageTypeLimit = 1,
-                            limit = 500,
-                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
-                            sortOrder = setOf(SortOrder.DESCENDING),
-                        ).content.items
-                    }
-                    val shows = async {
-                        api.itemsApi.getItems(
-                            fields = ItemRepository.browseFields,
-                            includeItemTypes = setOf(BaseItemKind.SERIES),
-                            recursive = true,
-                            imageTypeLimit = 1,
-                            limit = 500,
-                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
-                            sortOrder = setOf(SortOrder.DESCENDING),
-                        ).content.items
-                    }
-                    HydratedLibrary(
-                        myV = favorites.await().filterNot(::isServiceArtifact),
-                        movies = movies.await().filterNot(::isServiceArtifact),
-                        shows = shows.await().filterNot(::isServiceArtifact),
-                    )
                 }
-            }.onSuccess { hydrated ->
-                state = state.copy(
-                    myV = hydrated.myV,
-                    movies = hydrated.movies,
-                    shows = hydrated.shows,
-                )
+            }.onSuccess { loaded ->
+                state = when (tab) {
+                    MobileTab.MOVIES -> state.copy(movies = loaded)
+                    MobileTab.TV -> state.copy(shows = loaded)
+                    MobileTab.MYV -> state.copy(myV = loaded)
+                    else -> state
+                }
+                hydratedTabs += tab
             }
+            loadingTabs -= tab
         }
     }
+
+    private suspend fun searchLibrary(query: String): List<BaseItemDto> =
+        withContext(Dispatchers.IO) {
+            val cleanQuery = query.trim()
+            if (cleanQuery.length < 2) return@withContext emptyList()
+
+            try {
+                api.itemsApi.getItems(
+                    fields = ItemRepository.browseFields,
+                    includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                    recursive = true,
+                    imageTypeLimit = 1,
+                    limit = 100,
+                    searchTerm = cleanQuery,
+                ).content.items.filterNot(::isServiceArtifact)
+            } catch (error: Throwable) {
+                throw IllegalStateException(friendlyServiceError("Jellyfin", error), error)
+            }
+        }
 
     private fun loadPopularity() {
         val session = sessionRepository.currentSession.value
@@ -859,12 +885,6 @@ private data class MobileHomeState(
     val collections: List<BaseItemDto> = emptyList(),
 )
 
-private data class HydratedLibrary(
-    val myV: List<BaseItemDto>,
-    val movies: List<BaseItemDto>,
-    val shows: List<BaseItemDto>,
-)
-
 private val serviceOrder = listOf(
     "netflix",
     "prime",
@@ -963,6 +983,7 @@ private fun VesperMobile(
     userName: String,
     api: ApiClient,
     seerrConfigured: Boolean,
+    onLibrarySearch: suspend (String) -> List<BaseItemDto>,
     onSeerrSearch: suspend (String) -> List<SeerrSearchResult>,
     onSeerrRequest: suspend (SeerrSearchResult) -> String?,
     onSelect: (BaseItemDto) -> Unit,
@@ -971,6 +992,7 @@ private fun VesperMobile(
     onPlay: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
     onSwitchProfile: () -> Unit,
+    onTabSelected: (MobileTab) -> Unit,
     onSettings: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
@@ -1053,6 +1075,7 @@ private fun VesperMobile(
                     state = state,
                     api = api,
                     seerrConfigured = seerrConfigured,
+                    onLibrarySearch = onLibrarySearch,
                     onSeerrSearch = onSeerrSearch,
                     onSeerrRequest = onSeerrRequest,
                     onSelect = onSelect,
@@ -1063,7 +1086,10 @@ private fun VesperMobile(
 
             MobileBottomNav(
                 active = tab,
-                onSelect = { tab = it },
+                onSelect = {
+                    tab = it
+                    onTabSelected(it)
+                },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -2001,6 +2027,7 @@ private fun SearchBrowse(
     state: MobileHomeState,
     api: ApiClient,
     seerrConfigured: Boolean,
+    onLibrarySearch: suspend (String) -> List<BaseItemDto>,
     onSeerrSearch: suspend (String) -> List<SeerrSearchResult>,
     onSeerrRequest: suspend (SeerrSearchResult) -> String?,
     onSelect: (BaseItemDto) -> Unit,
@@ -2008,6 +2035,9 @@ private fun SearchBrowse(
     expanded: Boolean,
 ) {
     var query by remember { mutableStateOf("") }
+    var localSearchResults by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
+    var localSearchLoading by remember { mutableStateOf(false) }
+    var localSearchError by remember { mutableStateOf<String?>(null) }
     var seerrResults by remember { mutableStateOf<List<SeerrSearchResult>>(emptyList()) }
     var seerrLoading by remember { mutableStateOf(false) }
     var seerrError by remember { mutableStateOf<String?>(null) }
@@ -2017,16 +2047,21 @@ private fun SearchBrowse(
         (state.continueWatching + state.myV + state.movies + state.shows)
             .distinctBy { it.id }
     }
-    val localResults = if (query.isBlank()) all else all.filter { item ->
-        val haystack = listOfNotNull(
-            item.name,
-            item.seriesName,
-            item.productionYear?.toString(),
-        ).joinToString(" ").lowercase()
-        haystack.contains(query.trim().lowercase())
+    val cleanQuery = query.trim()
+    val localResults = when {
+        cleanQuery.isBlank() -> all
+        cleanQuery.length < 2 -> all.filter { item ->
+            val haystack = listOfNotNull(
+                item.name,
+                item.seriesName,
+                item.productionYear?.toString(),
+            ).joinToString(" ").lowercase()
+            haystack.contains(cleanQuery.lowercase())
+        }
+        else -> localSearchResults
     }
-    val localTmdbKeys = remember(all) {
-        all.mapNotNull { item ->
+    val localTmdbKeys = remember(localResults) {
+        localResults.mapNotNull { item ->
             val mediaType = when (item.type) {
                 BaseItemKind.MOVIE -> "movie"
                 BaseItemKind.SERIES -> "tv"
@@ -2041,23 +2076,48 @@ private fun SearchBrowse(
     }
 
     LaunchedEffect(query, seerrConfigured, seerrRefresh) {
-        val cleanQuery = query.trim()
-        if (!seerrConfigured || cleanQuery.length < 2) {
+        val requestedQuery = query.trim()
+        if (requestedQuery.length < 2) {
+            localSearchResults = emptyList()
+            localSearchLoading = false
+            localSearchError = null
             seerrResults = emptyList()
             seerrLoading = false
             seerrError = null
             return@LaunchedEffect
         }
 
-        delay(450)
-        seerrLoading = true
+        delay(350)
+        localSearchLoading = true
+        localSearchError = null
+        seerrLoading = seerrConfigured
         seerrError = null
-        runCatching { onSeerrSearch(cleanQuery) }
-            .onSuccess { seerrResults = it }
+
+        val localDeferred = async {
+            runCatching { onLibrarySearch(requestedQuery) }
+        }
+        val seerrDeferred = if (seerrConfigured) {
+            async { runCatching { onSeerrSearch(requestedQuery) } }
+        } else null
+
+        localDeferred.await()
+            .onSuccess { localSearchResults = it }
             .onFailure {
-                seerrResults = emptyList()
-                seerrError = it.message ?: "Couldn't reach Seerr."
+                localSearchResults = emptyList()
+                localSearchError = it.message ?: "Couldn't reach Jellyfin."
             }
+        localSearchLoading = false
+
+        if (seerrDeferred != null) {
+            seerrDeferred.await()
+                .onSuccess { seerrResults = it }
+                .onFailure {
+                    seerrResults = emptyList()
+                    seerrError = it.message ?: "Couldn't reach Seerr."
+                }
+        } else {
+            seerrResults = emptyList()
+        }
         seerrLoading = false
     }
 
@@ -2116,12 +2176,19 @@ private fun SearchBrowse(
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     SearchSectionHeader(
                         title = "In your library",
-                        subtitle = if (localResults.isEmpty()) "No local matches" else "${localResults.size} found",
+                        subtitle = when {
+                            localSearchLoading -> "Searching…"
+                            localSearchError != null -> localSearchError.orEmpty()
+                            localResults.isEmpty() -> "No local matches"
+                            else -> "${localResults.size} found"
+                        },
                     )
                 }
 
-                gridItems(localResults, key = { "local-${it.id}" }) { item ->
-                    GridMediaCard(item, api, onSelect, onToggleFavorite)
+                if (!localSearchLoading && localSearchError == null) {
+                    gridItems(localResults, key = { "local-${it.id}" }) { item ->
+                        GridMediaCard(item, api, onSelect, onToggleFavorite)
+                    }
                 }
 
                 item(span = { GridItemSpan(maxLineSpan) }) {
