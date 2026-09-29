@@ -828,31 +828,19 @@ private fun serviceDisplayName(name: String?): String =
         .replace(Regex("^\\s*streaming:\\s*", RegexOption.IGNORE_CASE), "")
         .ifBlank { "Streaming service" }
 
-private fun serviceLogoUrl(name: String?): String? {
+private fun serviceLogoResource(name: String?): Int? {
     val normalized = serviceDisplayName(name).trim().lowercase()
 
-    if (normalized.contains("apple")) {
-        return "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/28/Apple_TV_Plus_Logo.svg/330px-Apple_TV_Plus_Logo.svg.png"
-    }
-    if (normalized.contains("paramount")) {
-        return "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4e/Paramount%2B_logo.svg/330px-Paramount%2B_logo.svg.png"
-    }
-
-    val path = when {
-        normalized.contains("netflix") -> "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"
-        normalized.contains("disney") -> "/1edZOYAfoyZyZ3rklNSiUpXX30Q.png"
-        normalized.contains("amazon") || normalized.contains("prime") ->
-            "/w7HfLNm9CWwRmAMU58udl2L7We7.png"
-        normalized == "max" || normalized.contains("hbo") ->
-            "/rAb4M1LjGpWASxpk6Va791A7Nkw.png"
-        normalized.contains("iplayer") -> "/nc8Tpsr8SqCbsTUogPDD06gGzB3.jpg"
-        normalized.contains("itvx") -> "/1LuvKw01c2KQCt6DqgAgR06H2pT.jpg"
-        normalized.startsWith("now") -> "/y7mZSw1FV99yfawxOISBQTvtJxM.jpg"
-        normalized.contains("hulu") -> "/pqUTCleNUiTLAVlelGxUgWn1ELh.png"
-        normalized.contains("peacock") -> "/gIAcGTjKKr0KOHL5s4O36roJ8p7.png"
+    return when {
+        normalized.contains("netflix") -> R.drawable.logo_netflix
+        normalized.contains("disney") -> R.drawable.logo_disneyplus
+        normalized.contains("amazon") || normalized.contains("prime") -> R.drawable.logo_primevideo
+        normalized.contains("apple") -> R.drawable.logo_appletv
+        normalized.contains("paramount") -> R.drawable.logo_paramountplus
+        normalized == "max" || normalized.contains("hbo") -> R.drawable.logo_max
+        normalized.startsWith("now") -> R.drawable.logo_now
         else -> null
     }
-    return path?.let { "https://image.tmdb.org/t/p/w300$it" }
 }
 
 private fun collectionDisplayName(name: String?): String =
@@ -1392,7 +1380,7 @@ private fun MediaCard(
             if (providerTile) {
                 ProviderWordmark(
                     name = serviceDisplayName(item.name),
-                    logoUrl = serviceLogoUrl(item.name),
+                    logoResource = serviceLogoResource(item.name),
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -1480,7 +1468,7 @@ private fun MediaCard(
 @Composable
 private fun ProviderWordmark(
     name: String,
-    logoUrl: String?,
+    logoResource: Int?,
     modifier: Modifier = Modifier,
 ) {
     val normalized = name.trim().lowercase()
@@ -1496,10 +1484,10 @@ private fun ProviderWordmark(
     }
     val background = when {
         normalized.contains("netflix") -> Color(0xFF050505)
-        normalized.contains("disney") -> Color(0xFF102A56)
+        normalized.contains("disney") -> Color(0xFF0B1D3A)
         normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF07141D)
-        normalized.contains("apple") -> Color.White
-        normalized.contains("paramount") -> Color.White
+        normalized.contains("apple") -> Color(0xFF050505)
+        normalized.contains("paramount") -> Color(0xFF0064FF)
         normalized == "max" || normalized.contains("hbo") -> Color(0xFF24105C)
         normalized.startsWith("now") -> Color(0xFF09130E)
         else -> Color(0xFF111A23)
@@ -1507,8 +1495,6 @@ private fun ProviderWordmark(
     val foreground = when {
         normalized.contains("netflix") -> Color(0xFFE50914)
         normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF27B7E8)
-        normalized.contains("apple") -> Color.Black
-        normalized.contains("paramount") -> Color(0xFF0064FF)
         normalized.startsWith("now") -> Color(0xFF00FF85)
         else -> Color.White
     }
@@ -1527,13 +1513,14 @@ private fun ProviderWordmark(
         modifier = modifier.background(background),
         contentAlignment = Alignment.Center,
     ) {
-        if (!logoUrl.isNullOrBlank()) {
-            AsyncImage(
+        if (logoResource != null) {
+            Image(
+                painter = painterResource(logoResource),
+                contentDescription = wordmark,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                url = logoUrl,
-                scaleType = ImageView.ScaleType.FIT_CENTER,
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                contentScale = ContentScale.Fit,
             )
         } else {
             BasicText(
