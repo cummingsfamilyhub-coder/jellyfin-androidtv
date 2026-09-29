@@ -398,18 +398,19 @@ class MobileMainActivity : FragmentActivity() {
     private fun friendlyServiceError(service: String, error: Throwable): String {
         if (!isNetworkAvailable()) return "No network connection. Check Wi-Fi or mobile data and try again."
 
-        val details = generateSequence<Throwable>(error) { it.cause }
+        val causes = generateSequence<Throwable>(error) { it.cause }.toList()
+        val details = causes
             .mapNotNull { it.message }
             .joinToString(" ")
             .lowercase()
 
         return when {
-            error is SocketTimeoutException || details.contains("timeout") ->
+            causes.any { it is SocketTimeoutException } || details.contains("timeout") ->
                 "$service timed out. Try again."
             details.contains("401") || details.contains("unauthorized") ||
                 (details.contains("authentication") && details.contains("expired")) ->
                 "$service authentication has expired. Sign in again."
-            error is UnknownHostException || error is ConnectException || error is SSLException ->
+            causes.any { it is UnknownHostException || it is ConnectException || it is SSLException } ->
                 "$service is unreachable. Check your connection and try again."
             else -> "$service is unavailable right now. Try again."
         }
