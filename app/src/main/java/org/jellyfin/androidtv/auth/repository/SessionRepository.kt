@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.jellyfin.androidtv.VesperServiceConfig
 import org.jellyfin.androidtv.auth.model.Server
 import org.jellyfin.androidtv.auth.store.AuthenticationPreferences
 import org.jellyfin.androidtv.auth.store.AuthenticationStore
@@ -193,11 +194,13 @@ class SessionRepositoryImpl(
 				deviceInfo = newDeviceInfo,
 			)
 		} else {
-			val server = authenticationStore.getServer(session.serverId)
-				?: return false
+			if (authenticationStore.getServer(session.serverId) == null) return false
 
+			// Vesper uses one canonical Jellyfin endpoint on every network.
+			// Do not let a legacy LAN address from the authentication store
+			// replace the canonical URL after a successful mobile login.
 			update(
-				baseUrl = server.address,
+				baseUrl = VesperServiceConfig.JELLYFIN_BASE_URL,
 				accessToken = session.accessToken,
 				deviceInfo = newDeviceInfo,
 			)
