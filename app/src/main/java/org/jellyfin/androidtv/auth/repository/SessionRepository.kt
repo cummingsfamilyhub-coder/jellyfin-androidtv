@@ -89,10 +89,14 @@ class SessionRepositoryImpl(
 	}
 
 	override suspend fun switchCurrentSession(serverId: UUID, userId: UUID): Boolean {
-		// No change in user - don't switch
-		if (currentSession.value?.userId == userId) {
-			Timber.d("Current session user is the same as the requested user")
-			return false
+		// The requested session is already active. This is a successful outcome,
+		// not an authentication failure.
+		if (
+			currentSession.value?.serverId == serverId &&
+			currentSession.value?.userId == userId
+		) {
+			Timber.d("Requested session is already active")
+			return true
 		}
 
 		_state.value = SessionRepositoryState.SWITCHING_SESSION
