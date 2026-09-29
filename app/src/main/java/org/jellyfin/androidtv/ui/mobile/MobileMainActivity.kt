@@ -217,12 +217,27 @@ class MobileMainActivity : FragmentActivity() {
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
+                    val boxSets = async {
+                        api.itemsApi.getItems(
+                            fields = ItemRepository.browseFields,
+                            includeItemTypes = setOf(BaseItemKind.BOX_SET),
+                            recursive = true,
+                            imageTypeLimit = 1,
+                            limit = 100,
+                            sortBy = setOf(ItemSortBy.SORT_NAME),
+                        ).content.items
+                    }
 
+                    val allCollections = boxSets.await()
                     MobileHomeState(
                         continueWatching = resume.await().filterNot(::isServiceArtifact),
                         myV = favorites.await().filterNot(::isServiceArtifact),
                         movies = movies.await().filterNot(::isServiceArtifact),
                         shows = shows.await().filterNot(::isServiceArtifact),
+                        services = allCollections
+                            .filter(::isServiceCollection)
+                            .sortedBy(::serviceSortOrder),
+                        collections = allCollections.filterNot(::isServiceCollection),
                     )
                 }
             }.getOrElse { error ->
@@ -274,26 +289,10 @@ class MobileMainActivity : FragmentActivity() {
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
                     }
-                    val boxSets = async {
-                        api.itemsApi.getItems(
-                            fields = ItemRepository.browseFields,
-                            includeItemTypes = setOf(BaseItemKind.BOX_SET),
-                            recursive = true,
-                            imageTypeLimit = 1,
-                            limit = 100,
-                            sortBy = setOf(ItemSortBy.SORT_NAME),
-                        ).content.items
-                    }
-
-                    val allCollections = boxSets.await()
                     HydratedLibrary(
                         myV = favorites.await().filterNot(::isServiceArtifact),
                         movies = movies.await().filterNot(::isServiceArtifact),
                         shows = shows.await().filterNot(::isServiceArtifact),
-                        services = allCollections
-                            .filter(::isServiceCollection)
-                            .sortedBy(::serviceSortOrder),
-                        collections = allCollections.filterNot(::isServiceCollection),
                     )
                 }
             }.onSuccess { hydrated ->
@@ -301,8 +300,6 @@ class MobileMainActivity : FragmentActivity() {
                     myV = hydrated.myV,
                     movies = hydrated.movies,
                     shows = hydrated.shows,
-                    services = hydrated.services,
-                    collections = hydrated.collections,
                 )
             }
         }
@@ -854,8 +851,6 @@ private data class HydratedLibrary(
     val myV: List<BaseItemDto>,
     val movies: List<BaseItemDto>,
     val shows: List<BaseItemDto>,
-    val services: List<BaseItemDto>,
-    val collections: List<BaseItemDto>,
 )
 
 private val serviceOrder = listOf(
