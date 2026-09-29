@@ -28,6 +28,15 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Bundle official service logos
+        run: |
+          mkdir -p app/src/main/res/drawable-nodpi
+          curl -fL --retry 3 "https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Netflix_2015_logo.svg/960px-Netflix_2015_logo.svg.png" -o app/src/main/res/drawable-nodpi/service_netflix.png
+          curl -fL --retry 3 "https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Prime_Video_logo_%282024%29.svg/960px-Prime_Video_logo_%282024%29.svg.png" -o app/src/main/res/drawable-nodpi/service_prime_video.png
+          curl -fL --retry 3 "https://upload.wikimedia.org/wikipedia/commons/thumb/2/28/Apple_TV_Plus_Logo.svg/960px-Apple_TV_Plus_Logo.svg.png" -o app/src/main/res/drawable-nodpi/service_apple_tv.png
+          curl -fL --retry 3 "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Paramount%2B_logo.svg/960px-Paramount%2B_logo.svg.png" -o app/src/main/res/drawable-nodpi/service_paramount_plus.png
+          curl -fL --retry 3 "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Max_2025_logo.svg/960px-Max_2025_logo.svg.png" -o app/src/main/res/drawable-nodpi/service_max.png
+
       - name: Build debug APK
         run: |
           chmod +x ./gradlew
