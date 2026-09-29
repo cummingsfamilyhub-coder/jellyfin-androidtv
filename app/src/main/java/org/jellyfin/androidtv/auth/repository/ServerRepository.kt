@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import org.jellyfin.androidtv.VesperServiceConfig
 import org.jellyfin.androidtv.auth.model.AuthenticationStoreServer
 import org.jellyfin.androidtv.auth.model.ConnectedState
 import org.jellyfin.androidtv.auth.model.ConnectingState
@@ -76,7 +77,8 @@ class ServerRepositoryImpl(
 	// Loading data
 	override suspend fun loadStoredServers() {
 		authenticationStore.getServers()
-			.map { (id, entry) -> entry.asServer(id) }
+			.toList()
+			.map { (id, entry) -> canonicalizeServerAddress(id, entry).asServer(id) }
 			.sortedWith(compareByDescending<Server> { it.dateLastAccessed }.thenBy { it.name })
 			.let { _storedServers.emit(it) }
 	}
@@ -176,7 +178,8 @@ class ServerRepositoryImpl(
 	}.flowOn(Dispatchers.IO)
 
 	override suspend fun getServer(id: UUID, eagerUpdate: Boolean): Server? {
-		val server = authenticationStore.getServer(id) ?: return null
+		val storedServer = authenticationStore.getServer(id) ?: return null
+		val server = canonicalizeServerAddress(id, storedServer)
 
 		val updatedServer = try {
 			val forceUpdate = eagerUpdate && server.version
@@ -194,7 +197,8 @@ class ServerRepositoryImpl(
 
 	override suspend fun updateServer(server: Server, force: Boolean): Boolean {
 		// Only update existing servers
-		val serverInfo = authenticationStore.getServer(server.id) ?: return false
+		val storedServer = authenticationStore.getServer(server.id) ?: return false
+		val serverInfo = canonicalizeServerAddress(server.id, storedServer)
 
 		return try {
 			updateServerInternal(server.id, serverInfo, force) != null
@@ -243,6 +247,15 @@ class ServerRepositoryImpl(
 	}
 
 	// Helper functions
+	private fun canonicalizeServerAddress(id: UUID, server: AuthenticationStoreServer): AuthenticationStoreServer {
+		if (server.address == VesperServiceConfig.JELLYFIN_BASE_URL) return server
+
+		return server.copy(address = VesperServiceConfig.JELLYFIN_BASE_URL).also {
+			authenticationStore.putServer(id, it)
+			Timber.i("Migrated Vesper Jellyfin server address to canonical HTTPS endpoint")
+		}
+	}
+
 	private fun AuthenticationStoreServer.asServer(id: UUID) = Server(
 		id = id,
 		name = name,
