@@ -190,6 +190,63 @@ class MobileMainActivity : FragmentActivity() {
                             recursive = true,
                             filters = setOf(ItemFilter.IS_FAVORITE),
                             imageTypeLimit = 1,
+                            limit = 36,
+                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
+                            sortOrder = setOf(SortOrder.DESCENDING),
+                        ).content.items
+                    }
+                    val movies = async {
+                        api.itemsApi.getItems(
+                            fields = ItemRepository.browseFields,
+                            includeItemTypes = setOf(BaseItemKind.MOVIE),
+                            recursive = true,
+                            imageTypeLimit = 1,
+                            limit = 36,
+                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
+                            sortOrder = setOf(SortOrder.DESCENDING),
+                        ).content.items
+                    }
+                    val shows = async {
+                        api.itemsApi.getItems(
+                            fields = ItemRepository.browseFields,
+                            includeItemTypes = setOf(BaseItemKind.SERIES),
+                            recursive = true,
+                            imageTypeLimit = 1,
+                            limit = 36,
+                            sortBy = setOf(ItemSortBy.PLAY_COUNT),
+                            sortOrder = setOf(SortOrder.DESCENDING),
+                        ).content.items
+                    }
+
+                    MobileHomeState(
+                        continueWatching = resume.await().filterNot(::isServiceArtifact),
+                        myV = favorites.await().filterNot(::isServiceArtifact),
+                        movies = movies.await().filterNot(::isServiceArtifact),
+                        shows = shows.await().filterNot(::isServiceArtifact),
+                    )
+                }
+            }.getOrElse { error ->
+                MobileHomeState(error = friendlyServiceError("Jellyfin", error))
+            }
+
+            if (state.error == null) {
+                loadPopularity()
+                hydrateLibrary()
+            }
+        }
+    }
+
+    private fun hydrateLibrary() {
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val favorites = async {
+                        api.itemsApi.getItems(
+                            fields = ItemRepository.browseFields,
+                            includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                            recursive = true,
+                            filters = setOf(ItemFilter.IS_FAVORITE),
+                            imageTypeLimit = 1,
                             limit = 500,
                             sortBy = setOf(ItemSortBy.PLAY_COUNT),
                             sortOrder = setOf(SortOrder.DESCENDING),
@@ -229,23 +286,25 @@ class MobileMainActivity : FragmentActivity() {
                     }
 
                     val allCollections = boxSets.await()
-                    val favoriteItems = favorites.await().filterNot(::isServiceArtifact)
-                    val movieItems = movies.await().filterNot(::isServiceArtifact)
-                    val showItems = shows.await().filterNot(::isServiceArtifact)
-
-                    MobileHomeState(
-                        continueWatching = resume.await().filterNot(::isServiceArtifact),
-                        myV = favoriteItems,
-                        movies = movieItems,
-                        shows = showItems,
-                        services = allCollections.filter(::isServiceCollection),
+                    HydratedLibrary(
+                        myV = favorites.await().filterNot(::isServiceArtifact),
+                        movies = movies.await().filterNot(::isServiceArtifact),
+                        shows = shows.await().filterNot(::isServiceArtifact),
+                        services = allCollections
+                            .filter(::isServiceCollection)
+                            .sortedBy(::serviceSortOrder),
                         collections = allCollections.filterNot(::isServiceCollection),
                     )
                 }
-            }.getOrElse { error ->
-                MobileHomeState(error = friendlyServiceError("Jellyfin", error))
+            }.onSuccess { hydrated ->
+                state = state.copy(
+                    myV = hydrated.myV,
+                    movies = hydrated.movies,
+                    shows = hydrated.shows,
+                    services = hydrated.services,
+                    collections = hydrated.collections,
+                )
             }
-            if (state.error == null) loadPopularity()
         }
     }
 
@@ -791,51 +850,81 @@ private data class MobileHomeState(
     val collections: List<BaseItemDto> = emptyList(),
 )
 
-private val serviceCollectionAliases = setOf(
-    "netflix",
-    "disney+",
-    "disney plus",
-    "prime video",
-    "amazon prime",
-    "amazon prime video",
-    "max",
-    "hbo max",
-    "apple tv",
-    "apple tv+",
-    "apple tv plus",
-    "paramount+",
-    "paramount plus",
-    "peacock",
-    "hulu",
-    "bbc iplayer",
-    "itvx",
-    "now",
-    "now tv",
+private data class HydratedLibrary(
+    val myV: List<BaseItemDto>,
+    val movies: List<BaseItemDto>,
+    val shows: List<BaseItemDto>,
+    val services: List<BaseItemDto>,
+    val collections: List<BaseItemDto>,
 )
 
-private fun isServiceCollection(item: BaseItemDto): Boolean {
-    val name = item.name?.trim()?.lowercase() ?: return false
-    return name.startsWith("streaming:") || name in serviceCollectionAliases
-}
+private val serviceOrder = listOf(
+    "netflix",
+    "prime",
+    "disney",
+    "apple",
+    "paramount",
+    "max",
+    "now",
+    "iplayer",
+    "itvx",
+    "hulu",
+    "peacock",
+)
 
-private fun isServiceArtifact(item: BaseItemDto): Boolean {
-    val name = item.name?.trim()?.lowercase() ?: return false
-    return name.startsWith("streaming:") || name in serviceCollectionAliases
-}
-
-private fun serviceDisplayName(name: String?): String =
+private fun cleanedServiceName(name: String?): String =
     name.orEmpty()
-        .replace(Regex("^\\s*streaming:\\s*", RegexOption.IGNORE_CASE), "")
-        .ifBlank { "Streaming service" }
+        .replace(Regex("^\\s*streaming\\s*[:\\-]\\s*", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("\\s+(collection|library)$", RegexOption.IGNORE_CASE), "")
+        .trim()
 
-private fun serviceLogoResource(name: String?): Int? {
-    val normalized = serviceDisplayName(name).trim().lowercase()
+private fun serviceKey(name: String?): String? {
+    val normalized = cleanedServiceName(name).lowercase()
 
     return when {
-        normalized.contains("disney") -> R.drawable.logo_disneyplus
-        normalized.contains("apple") -> R.drawable.logo_appletv
+        normalized.contains("netflix") -> "netflix"
+        normalized.contains("amazon") || normalized.contains("prime video") || normalized == "prime" -> "prime"
+        normalized.contains("disney") -> "disney"
+        normalized.contains("apple tv") || normalized == "apple" -> "apple"
+        normalized.contains("paramount") -> "paramount"
+        normalized == "max" || normalized.contains("hbo max") -> "max"
+        normalized == "now" || normalized.startsWith("now tv") -> "now"
+        normalized.contains("iplayer") -> "iplayer"
+        normalized.contains("itvx") -> "itvx"
+        normalized.contains("hulu") -> "hulu"
+        normalized.contains("peacock") -> "peacock"
         else -> null
     }
+}
+
+private fun isServiceCollection(item: BaseItemDto): Boolean =
+    serviceKey(item.name) != null || item.name.orEmpty().trim().lowercase().startsWith("streaming:")
+
+private fun isServiceArtifact(item: BaseItemDto): Boolean =
+    serviceKey(item.name) != null || item.name.orEmpty().trim().lowercase().startsWith("streaming:")
+
+private fun serviceDisplayName(name: String?): String = when (serviceKey(name)) {
+    "netflix" -> "Netflix"
+    "prime" -> "Prime Video"
+    "disney" -> "Disney+"
+    "apple" -> "Apple TV+"
+    "paramount" -> "Paramount+"
+    "max" -> if (cleanedServiceName(name).contains("hbo", ignoreCase = true)) "HBO Max" else "Max"
+    "now" -> "NOW"
+    "iplayer" -> "BBC iPlayer"
+    "itvx" -> "ITVX"
+    "hulu" -> "Hulu"
+    "peacock" -> "Peacock"
+    else -> cleanedServiceName(name).ifBlank { "Streaming service" }
+}
+
+private fun serviceSortOrder(item: BaseItemDto): Int =
+    serviceOrder.indexOf(serviceKey(item.name)).let { if (it >= 0) it else Int.MAX_VALUE }
+
+private fun serviceLogoResource(name: String?): Int? = when (serviceKey(name)) {
+    "prime" -> R.drawable.logo_primevideo
+    "disney" -> R.drawable.logo_disneyplus
+    else -> null
 }
 
 private fun collectionDisplayName(name: String?): String =
@@ -1466,74 +1555,95 @@ private fun ProviderWordmark(
     logoResource: Int?,
     modifier: Modifier = Modifier,
 ) {
-    val normalized = name.trim().lowercase()
-    val wordmark = when {
-        normalized.contains("netflix") -> "NETFLIX"
-        normalized.contains("disney") -> "Disney+"
-        normalized.contains("amazon") || normalized.contains("prime") -> "prime video"
-        normalized.contains("apple") -> "Apple TV+"
-        normalized.contains("paramount") -> "Paramount+"
-        normalized == "max" || normalized.contains("hbo") -> "max"
-        normalized.startsWith("now") -> "NOW"
-        else -> name
-    }
-    val background = when {
-        normalized.contains("netflix") -> Color(0xFF050505)
-        normalized.contains("disney") -> Color(0xFF0B1D3A)
-        normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF07141D)
-        normalized.contains("apple") -> Color(0xFF050505)
-        normalized.contains("paramount") -> Color(0xFF0064FF)
-        normalized == "max" || normalized.contains("hbo") -> Color(0xFF24105C)
-        normalized.startsWith("now") -> Color(0xFF09130E)
+    val key = serviceKey(name)
+    val displayName = serviceDisplayName(name)
+    val background = when (key) {
+        "netflix" -> Color(0xFF050505)
+        "disney" -> Color(0xFF0B1D3A)
+        "prime" -> Color(0xFF07141D)
+        "apple" -> Color(0xFF050505)
+        "paramount" -> Color(0xFF0064FF)
+        "max" -> Color(0xFF25105D)
+        "now" -> Color(0xFF09130E)
+        "iplayer" -> Color(0xFF111111)
+        "itvx" -> Color(0xFF16121D)
+        "hulu" -> Color(0xFF0B1F17)
+        "peacock" -> Color(0xFF111111)
         else -> Color(0xFF111A23)
     }
-    val foreground = when {
-        normalized.contains("netflix") -> Color(0xFFE50914)
-        normalized.contains("amazon") || normalized.contains("prime") -> Color(0xFF00A8E1)
-        normalized.contains("paramount") -> Color.White
-        normalized == "max" || normalized.contains("hbo") -> Color(0xFF2D5BFF)
-        normalized.startsWith("now") -> Color(0xFF00FF85)
+    val foreground = when (key) {
+        "netflix" -> Color(0xFFE50914)
+        "paramount" -> Color.White
+        "max" -> Color(0xFF4976FF)
+        "now" -> Color(0xFF00FF85)
+        "iplayer" -> Color(0xFFFF4B8B)
+        "itvx" -> Color(0xFFFFE600)
+        "hulu" -> Color(0xFF1CE783)
+        "peacock" -> Color.White
         else -> Color.White
-    }
-    val size = when {
-        normalized.contains("netflix") -> 30.sp
-        normalized.contains("disney") -> 30.sp
-        normalized.contains("amazon") || normalized.contains("prime") -> 30.sp
-        normalized.contains("apple") -> 28.sp
-        normalized.contains("paramount") -> 28.sp
-        normalized == "max" || normalized.contains("hbo") -> 42.sp
-        normalized.startsWith("now") -> 34.sp
-        else -> 24.sp
     }
 
     Box(
         modifier = modifier.background(background),
         contentAlignment = Alignment.Center,
     ) {
-        if (logoResource != null) {
-            Image(
-                painter = painterResource(logoResource),
-                contentDescription = wordmark,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 24.dp, vertical = 20.dp),
-                contentScale = ContentScale.Fit,
-            )
-        } else {
-            BasicText(
-                wordmark,
-                style = TextStyle(
-                    color = foreground,
-                    fontSize = size,
-                    fontWeight = if (normalized.contains("amazon") || normalized.contains("prime")) {
-                        FontWeight.SemiBold
-                    } else {
-                        FontWeight.Black
-                    },
-                    letterSpacing = if (normalized.contains("netflix")) 1.2.sp else 0.sp,
-                ),
-                maxLines = 1,
-            )
+        when {
+            key == "apple" -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.logo_apple),
+                        contentDescription = null,
+                        modifier = Modifier.size(45.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    BasicText(
+                        "tv+",
+                        style = TextStyle(
+                            color = Color.White,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        maxLines = 1,
+                    )
+                }
+            }
+            logoResource != null -> {
+                Image(
+                    painter = painterResource(logoResource),
+                    contentDescription = displayName,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+            else -> {
+                val size = when (key) {
+                    "netflix" -> 29.sp
+                    "paramount" -> 28.sp
+                    "max" -> 40.sp
+                    "now" -> 34.sp
+                    "iplayer" -> 27.sp
+                    "itvx" -> 34.sp
+                    "hulu" -> 34.sp
+                    "peacock" -> 27.sp
+                    else -> 24.sp
+                }
+                BasicText(
+                    displayName,
+                    style = TextStyle(
+                        color = foreground,
+                        fontSize = size,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = if (key == "netflix") 1.2.sp else 0.sp,
+                    ),
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
