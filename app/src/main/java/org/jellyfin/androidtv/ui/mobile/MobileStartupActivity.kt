@@ -135,8 +135,9 @@ class MobileStartupActivity : FragmentActivity() {
                 }
             }
 
-            val last = storedServers.maxByOrNull { it.dateLastAccessed }
-            if (last != null) address = last.address
+            // Vesper always starts from the canonical HTTPS endpoint.
+            // Stored server entries are migrated only after their Jellyfin server ID is verified.
+            address = VesperServiceConfig.JELLYFIN_BASE_URL
         }
     }
 
