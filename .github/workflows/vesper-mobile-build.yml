@@ -70,6 +70,8 @@ jobs:
           manifest = Path("app/src/main/AndroidManifest.xml")
           text = manifest.read_text(encoding="utf-8")
           text = text.replace('android:icon="@mipmap/app_icon"', 'android:icon="@drawable/vesper_icon"')
+          text = text.replace('android:usesCleartextTraffic="true"', 'android:usesCleartextTraffic="false"')
+          text = text.replace('android:networkSecurityConfig="@xml/network_security_config"', 'android:networkSecurityConfig="@xml/vesper_mobile_network_security_config"')
           text = text.replace(
               '                <action android:name="android.intent.action.MAIN" />\n',
               ''
