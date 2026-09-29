@@ -398,7 +398,7 @@ class MobileMainActivity : FragmentActivity() {
     private fun friendlyServiceError(service: String, error: Throwable): String {
         if (!isNetworkAvailable()) return "No network connection. Check Wi-Fi or mobile data and try again."
 
-        val details = generateSequence(error as Throwable?) { it.cause }
+        val details = generateSequence<Throwable>(error) { it.cause }
             .mapNotNull { it.message }
             .joinToString(" ")
             .lowercase()
@@ -448,17 +448,7 @@ class MobileMainActivity : FragmentActivity() {
 
             try {
                 if (connection.responseCode !in 200..299) {
-                    val message = connection.errorStream
-                        ?.bufferedReader()
-                        ?.use { it.readText() }
-                        ?.let { body ->
-                            runCatching { JSONObject(body).optString("message") }.getOrNull()
-                        }
-                        .orEmpty()
-                    throw IllegalStateException(
-                        message.takeIf { it.isNotBlank() && connection.responseCode !in listOf(401, 403) }
-                            ?: seerrHttpError(connection.responseCode)
-                    )
+                    throw IllegalStateException(seerrHttpError(connection.responseCode))
                 }
 
                 val body = connection.inputStream.bufferedReader().use { it.readText() }
