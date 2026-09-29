@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.jellyfin.androidtv.VesperServiceConfig
 import org.jellyfin.androidtv.auth.model.Server
 import org.jellyfin.androidtv.auth.store.AuthenticationPreferences
 import org.jellyfin.androidtv.auth.store.AuthenticationStore
@@ -194,11 +193,11 @@ class SessionRepositoryImpl(
 				deviceInfo = newDeviceInfo,
 			)
 		} else {
-			authenticationStore.getServer(session.serverId)
+			val server = authenticationStore.getServer(session.serverId)
 				?: return false
 
 			update(
-				baseUrl = VesperServiceConfig.JELLYFIN_BASE_URL,
+				baseUrl = server.address,
 				accessToken = session.accessToken,
 				deviceInfo = newDeviceInfo,
 			)
