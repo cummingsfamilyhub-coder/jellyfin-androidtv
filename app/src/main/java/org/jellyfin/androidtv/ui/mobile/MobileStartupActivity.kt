@@ -42,6 +42,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.JellyfinApplication
+import org.jellyfin.androidtv.VesperServiceConfig
 import org.jellyfin.androidtv.auth.model.ApiClientErrorLoginState
 import org.jellyfin.androidtv.auth.model.AuthenticatedState
 import org.jellyfin.androidtv.auth.model.AuthenticatingState
@@ -71,7 +72,7 @@ class MobileStartupActivity : FragmentActivity() {
     private val userRepository by inject<UserRepository>()
 
     private var stage by mutableStateOf(LoginStage.SERVER)
-    private var address by mutableStateOf("")
+    private var address by mutableStateOf(VesperServiceConfig.JELLYFIN_BASE_URL)
     private var server by mutableStateOf<Server?>(null)
     private var users by mutableStateOf<List<User>>(emptyList())
     private var selectedUser by mutableStateOf<User?>(null)
@@ -156,7 +157,7 @@ class MobileStartupActivity : FragmentActivity() {
                     }
                     is UnableToConnectState -> {
                         busy = false
-                        error = "Couldn't connect to that Jellyfin address."
+                        error = "Jellyfin is unreachable. Check your connection and try again."
                     }
                     else -> Unit
                 }
@@ -350,7 +351,7 @@ private fun MobileLoginScreen(
                     item {
                         BasicText("Server address", style = labelStyle)
                         Spacer(Modifier.height(8.dp))
-                        VesperTextField(address, onAddressChange, "http://192.168.x.x:8096")
+                        VesperTextField(address, onAddressChange, VesperServiceConfig.JELLYFIN_BASE_URL)
                         Spacer(Modifier.height(14.dp))
                         LoginButton(if (busy) "Connecting…" else "Connect", onConnect, !busy && address.isNotBlank())
                     }
