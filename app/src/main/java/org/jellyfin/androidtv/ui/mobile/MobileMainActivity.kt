@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -930,8 +931,12 @@ private fun serviceSortOrder(item: BaseItemDto): Int {
 }
 
 private fun serviceLogoResource(name: String?): Int? = when (serviceKey(name)) {
+    "netflix" -> R.drawable.service_netflix
+    "prime" -> R.drawable.service_prime_video
     "disney" -> R.drawable.logo_disneyplus
-    "max" -> R.drawable.logo_hbomax
+    "apple" -> R.drawable.service_apple_tv
+    "paramount" -> R.drawable.service_paramount_plus
+    "max" -> R.drawable.service_max
     else -> null
 }
 
@@ -1579,82 +1584,50 @@ private fun ProviderWordmark(
         "peacock" -> Color(0xFF111111)
         else -> Color(0xFF111A23)
     }
-    val foreground = when (key) {
-        "netflix" -> Color(0xFFE50914)
-        "paramount" -> Color.White
-        "max" -> Color.White
-        "now" -> Color(0xFF00FF85)
-        "iplayer" -> Color(0xFFFF4B8B)
-        "itvx" -> Color(0xFFFFE600)
-        "hulu" -> Color(0xFF1CE783)
-        "peacock" -> Color.White
-        else -> Color.White
-    }
 
     Box(
         modifier = modifier.background(background),
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            key == "apple" -> {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Image(
-                        painter = painterResource(R.drawable.logo_apple),
-                        contentDescription = null,
-                        modifier = Modifier.size(45.dp),
-                        contentScale = ContentScale.Fit,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    BasicText(
-                        "tv+",
-                        style = TextStyle(
-                            color = Color.White,
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        maxLines = 1,
-                    )
-                }
+        if (logoResource != null) {
+            val tint = when (key) {
+                "prime" -> ColorFilter.tint(Color(0xFF00A8E1))
+                "apple", "paramount", "max" -> ColorFilter.tint(Color.White)
+                else -> null
             }
-            logoResource != null -> {
-                Image(
-                    painter = painterResource(logoResource),
-                    contentDescription = displayName,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(
-                            horizontal = if (key == "max") 32.dp else 24.dp,
-                            vertical = if (key == "max") 26.dp else 20.dp,
-                        ),
-                    contentScale = ContentScale.Fit,
-                )
-            }
-            else -> {
-                val size = when (key) {
-                    "netflix" -> 29.sp
-                    "paramount" -> 28.sp
-                    "max" -> 40.sp
-                    "now" -> 34.sp
-                    "iplayer" -> 27.sp
-                    "itvx" -> 34.sp
-                    "hulu" -> 34.sp
-                    "peacock" -> 27.sp
-                    else -> 24.sp
-                }
-                BasicText(
-                    displayName,
-                    style = TextStyle(
-                        color = foreground,
-                        fontSize = size,
-                        fontWeight = if (key == "prime") FontWeight.SemiBold else FontWeight.Black,
-                        letterSpacing = if (key == "netflix") 1.2.sp else 0.sp,
+
+            Image(
+                painter = painterResource(logoResource),
+                contentDescription = displayName,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        horizontal = when (key) {
+                            "apple" -> 38.dp
+                            "paramount" -> 34.dp
+                            "max" -> 40.dp
+                            else -> 28.dp
+                        },
+                        vertical = when (key) {
+                            "apple" -> 28.dp
+                            "paramount" -> 30.dp
+                            "max" -> 32.dp
+                            else -> 22.dp
+                        },
                     ),
-                    maxLines = 1,
-                )
-            }
+                contentScale = ContentScale.Fit,
+                colorFilter = tint,
+            )
+        } else {
+            BasicText(
+                displayName,
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = 27.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+                maxLines = 1,
+            )
         }
     }
 }
