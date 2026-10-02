@@ -1232,12 +1232,12 @@ private fun VideoHub(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 118.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
     ) {
         item {
             MobileSectionTopBar(
                 title = "Video",
-                subtitle = "Movies, TV, services and collections",
+                subtitle = "Movies · TV · Services",
                 userName = userName,
                 onSwitchProfile = onSwitchProfile,
                 onSettings = onSettings,
@@ -1275,12 +1275,12 @@ private fun VideoHub(
 
         val movies = sortByPopularity(state.movies, popularity, popularityScope)
         if (movies.isNotEmpty()) item {
-            MediaRow("Movies", movies, api, onSelect, onToggleFavorite)
+            MediaRow("Trending Movies", movies, api, onSelect, onToggleFavorite)
         }
 
         val shows = sortByPopularity(state.shows, popularity, popularityScope)
         if (shows.isNotEmpty()) item {
-            MediaRow("TV Shows", shows, api, onSelect, onToggleFavorite)
+            MediaRow("Trending TV Shows", shows, api, onSelect, onToggleFavorite)
         }
 
         if (state.services.isNotEmpty()) item {
@@ -1294,12 +1294,13 @@ private fun VideoHub(
                 nameFormatter = { serviceDisplayName(it.name) },
                 showFavorite = false,
                 providerTiles = true,
+                providerLogos = state.serviceLogos,
             )
         }
 
         if (state.collections.isNotEmpty()) item {
             MediaRow(
-                title = "Collections",
+                title = "Curated Collections",
                 media = state.collections,
                 api = api,
                 onSelect = onSelect,
@@ -1312,7 +1313,7 @@ private fun VideoHub(
 
         val myV = sortByPopularity(state.myV, popularity, popularityScope)
         if (myV.isNotEmpty()) item {
-            MediaRow("MyV", myV, api, onSelect, onToggleFavorite)
+            MediaRow("MyV / Favourites", myV, api, onSelect, onToggleFavorite)
         }
     }
 }
@@ -1325,12 +1326,12 @@ private fun MusicHub(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 118.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
     ) {
         item {
             MobileSectionTopBar(
                 title = "Music",
-                subtitle = "Your library, radio and room playback",
+                subtitle = "Artists · Albums · Radio · Rooms",
                 userName = userName,
                 onSwitchProfile = onSwitchProfile,
                 onSettings = onSettings,
@@ -1341,27 +1342,48 @@ private fun MusicHub(
             PlaceholderHero(
                 eyebrow = "MUSIC",
                 title = "A deeper listen",
-                subtitle = "Music Assistant will power your library, playback, queues and rooms.",
-                action = "Music integration next",
+                subtitle = "Your own library, radio and room playback in one place.",
+                action = "Music Assistant integration next",
                 icon = "♫",
             )
         }
 
         item {
             PlaceholderTileRow(
-                title = "Your music",
+                title = "Recently Played",
                 items = listOf(
-                    "Recently played" to "Pick up where you left off",
-                    "Artists" to "Browse your library",
-                    "Albums" to "Your local collection",
+                    "Recently played" to "Your listening history",
                     "Radio" to "Clyde 1 and favourites",
+                    "Queue" to "Pick up where you left off",
                 ),
             )
         }
 
         item {
             PlaceholderTileRow(
-                title = "Around the house",
+                title = "Made for You",
+                items = listOf(
+                    "Discover" to "Fresh music from your library",
+                    "Chill Mix" to "A calmer queue",
+                    "Deep Focus" to "Music for getting stuff done",
+                ),
+            )
+        }
+
+        item {
+            PlaceholderTileRow(
+                title = "Artists",
+                items = listOf(
+                    "Artists" to "Browse by artist",
+                    "Albums" to "Your local collection",
+                    "Playlists" to "Saved queues and mixes",
+                ),
+            )
+        }
+
+        item {
+            PlaceholderTileRow(
+                title = "Around the House",
                 items = listOf(
                     "Living Room" to "Room playback",
                     "Den" to "Room playback",
@@ -1380,12 +1402,12 @@ private fun BooksHub(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 118.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
     ) {
         item {
             MobileSectionTopBar(
                 title = "Books",
-                subtitle = "Ebooks and audiobooks in one place",
+                subtitle = "Read · Listen · Resume",
                 userName = userName,
                 onSwitchProfile = onSwitchProfile,
                 onSettings = onSettings,
@@ -1396,20 +1418,43 @@ private fun BooksHub(
             PlaceholderHero(
                 eyebrow = "BOOKS",
                 title = "Read or listen",
-                subtitle = "A clean Kindle-style reader and audiobooks will live together here.",
+                subtitle = "Ebooks and audiobooks, with progress following you between devices.",
                 action = "Book library later",
                 icon = "▤",
             )
         }
 
+        item { BookModeStrip() }
+
         item {
             PlaceholderTileRow(
-                title = "Library",
+                title = "Continue Reading",
                 items = listOf(
-                    "Continue reading" to "Resume on any device",
-                    "Continue listening" to "Audiobooks",
+                    "Continue reading" to "Resume from your last page",
+                    "Highlights" to "Bookmarks and notes later",
+                    "MyV" to "Saved books",
+                ),
+            )
+        }
+
+        item {
+            PlaceholderTileRow(
+                title = "Continue Listening",
+                items = listOf(
+                    "Audiobooks" to "Resume listening",
+                    "New audio" to "Recently added",
+                    "Downloads" to "Offline listening later",
+                ),
+            )
+        }
+
+        item {
+            PlaceholderTileRow(
+                title = "New Books",
+                items = listOf(
                     "New books" to "Recently added",
-                    "MyV" to "Saved favourites",
+                    "Authors" to "Browse by author",
+                    "Collections" to "Series and shelves",
                 ),
             )
         }
@@ -1514,66 +1559,80 @@ private fun PlaceholderHero(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 10.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .height(210.dp)
+            .padding(horizontal = 18.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(22.dp))
             .background(
                 Brush.linearGradient(
                     listOf(
-                        Color(0xFF17162B),
-                        Color(0xFF0D1622),
-                        Color(0xFF10141B),
+                        Color(0xFF1A1631),
+                        Color(0xFF11182A),
+                        Color(0xFF08111C),
                     )
                 )
             )
-            .border(1.dp, Color(0x334D65FF), RoundedCornerShape(24.dp))
-            .padding(20.dp),
+            .border(1.dp, Color(0x554D42A6), RoundedCornerShape(22.dp)),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 24.dp)
+                .size(112.dp)
+                .clip(RoundedCornerShape(38.dp))
+                .background(Color(0x242F6BFF)),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                icon,
+                style = TextStyle(color = Color(0xFF9D82FF), fontSize = 58.sp, fontWeight = FontWeight.Bold),
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxWidth(.66f)
+                .padding(start = 22.dp),
+        ) {
+            BasicText(
+                eyebrow,
+                style = TextStyle(
+                    color = Color(0xFFA98CFF),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.2.sp,
+                ),
+            )
+            Spacer(Modifier.height(8.dp))
+            BasicText(
+                title.uppercase(),
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = 29.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 31.sp,
+                    letterSpacing = 1.2.sp,
+                ),
+                maxLines = 2,
+            )
+            Spacer(Modifier.height(7.dp))
+            BasicText(
+                subtitle,
+                style = TextStyle(color = Color(0xFFA7B1BD), fontSize = 12.sp, lineHeight = 16.sp),
+                maxLines = 2,
+            )
+            Spacer(Modifier.height(12.dp))
             Box(
                 modifier = Modifier
-                    .size(76.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(Color(0x332F6BFF)),
-                contentAlignment = Alignment.Center,
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0x302F6BFF))
+                    .border(1.dp, Color(0x334D65FF), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 13.dp, vertical = 7.dp),
             ) {
                 BasicText(
-                    icon,
-                    style = TextStyle(color = Color(0xFFA891FF), fontSize = 38.sp, fontWeight = FontWeight.Bold),
+                    action,
+                    style = TextStyle(color = Color(0xFFC0B0FF), fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
                 )
-            }
-            Spacer(Modifier.width(18.dp))
-            Column(Modifier.weight(1f)) {
-                BasicText(
-                    eyebrow,
-                    style = TextStyle(
-                        color = Color(0xFF9D82FF),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp,
-                    ),
-                )
-                Spacer(Modifier.height(5.dp))
-                BasicText(
-                    title,
-                    style = TextStyle(color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold),
-                )
-                Spacer(Modifier.height(6.dp))
-                BasicText(
-                    subtitle,
-                    style = TextStyle(color = Color(0xFFA7B1BD), fontSize = 13.sp, lineHeight = 18.sp),
-                )
-                Spacer(Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0x222F6BFF))
-                        .padding(horizontal = 13.dp, vertical = 7.dp),
-                ) {
-                    BasicText(
-                        action,
-                        style = TextStyle(color = Color(0xFFB8ABFF), fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                    )
-                }
             }
         }
     }
@@ -1584,35 +1643,104 @@ private fun PlaceholderTileRow(
     title: String,
     items: List<Pair<String, String>>,
 ) {
-    Column(Modifier.padding(top = 12.dp)) {
+    Column(Modifier.padding(top = 9.dp)) {
         BasicText(
-            title,
-            style = TextStyle(color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            "$title  ›",
+            style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
         )
         LazyRow(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(items) { item ->
-                Column(
+                Row(
                     modifier = Modifier
-                        .width(178.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xB5151B25))
-                        .border(1.dp, Color(0x223D4F73), RoundedCornerShape(20.dp))
-                        .padding(16.dp),
+                        .width(164.dp)
+                        .height(92.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    Color(0xD51A1C29),
+                                    Color(0xC5101721),
+                                )
+                            )
+                        )
+                        .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
+                        .padding(13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    BasicText(
-                        item.first,
-                        style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold),
-                    )
-                    Spacer(Modifier.height(5.dp))
-                    BasicText(
-                        item.second,
-                        style = TextStyle(color = Color(0xFF8290A0), fontSize = 12.sp),
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(Color(0x332F6BFF)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(
+                            item.first.take(1).uppercase(),
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        BasicText(
+                            item.first,
+                            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        BasicText(
+                            item.second,
+                            style = TextStyle(color = Color(0xFF818A98), fontSize = 10.sp, lineHeight = 13.sp),
+                            maxLines = 2,
+                        )
+                    }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookModeStrip() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xD5161824))
+            .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
+            .padding(5.dp),
+    ) {
+        listOf("▤" to "Read", "♫" to "Listen").forEachIndexed { index, item ->
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (index == 0) Color(0x3A6848FF) else Color.Transparent)
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                BasicText(
+                    item.first,
+                    style = TextStyle(
+                        color = if (index == 0) Color(0xFFA98CFF) else Color(0xFF8B93A0),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+                Spacer(Modifier.width(8.dp))
+                BasicText(
+                    item.second,
+                    style = TextStyle(
+                        color = if (index == 0) Color.White else Color(0xFFB2B7C0),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
             }
         }
     }
@@ -1635,7 +1763,7 @@ private fun MobileHome(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 118.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
     ) {
         item {
             MobileTopBar(
@@ -1669,8 +1797,6 @@ private fun MobileHome(
         } else {
             val hero = state.continueWatching.firstOrNull()
             val homeMyV = sortByPopularity(state.myV, popularity, popularityScope)
-            val homeMovies = sortByPopularity(state.movies, popularity, popularityScope)
-            val homeShows = sortByPopularity(state.shows, popularity, popularityScope)
 
             if (hero != null) {
                 item {
@@ -1688,34 +1814,31 @@ private fun MobileHome(
             if (state.continueWatching.isNotEmpty()) item {
                 MediaRow("Continue Watching", state.continueWatching, api, onSelect, onToggleFavorite, landscape = true)
             }
-            if (homeMyV.isNotEmpty()) item { MediaRow("MyV", homeMyV, api, onSelect, onToggleFavorite) }
-            if (homeMovies.isNotEmpty()) item { MediaRow("Movies", homeMovies, api, onSelect, onToggleFavorite) }
-            if (homeShows.isNotEmpty()) item { MediaRow("TV Shows", homeShows, api, onSelect, onToggleFavorite) }
-            if (state.services.isNotEmpty()) item {
-                MediaRow(
-                    title = "Services",
-                    media = state.services,
-                    api = api,
-                    onSelect = onSelect,
-                    onToggleFavorite = onToggleFavorite,
-                    landscape = true,
-                    nameFormatter = { serviceDisplayName(it.name) },
-                    showFavorite = false,
-                    providerTiles = true,
-                    providerLogos = state.serviceLogos,
+
+            item {
+                PlaceholderTileRow(
+                    title = "Continue Listening",
+                    items = listOf(
+                        "Music Assistant" to "Recently played will appear here",
+                        "Radio" to "Clyde 1 and favourites",
+                        "Rooms" to "Pick up playback around the house",
+                    ),
                 )
             }
-            if (state.collections.isNotEmpty()) item {
-                MediaRow(
-                    title = "Collections",
-                    media = state.collections,
-                    api = api,
-                    onSelect = onSelect,
-                    onToggleFavorite = onToggleFavorite,
-                    landscape = true,
-                    nameFormatter = { collectionDisplayName(it.name) },
-                    showFavorite = false,
+
+            item {
+                PlaceholderTileRow(
+                    title = "Continue Reading",
+                    items = listOf(
+                        "Books" to "Reading progress will live here",
+                        "Audiobooks" to "Resume listening across devices",
+                        "Reader" to "Kindle-style reading is planned",
+                    ),
                 )
+            }
+
+            if (homeMyV.isNotEmpty()) item {
+                MediaRow("MyV / Favourites", homeMyV, api, onSelect, onToggleFavorite)
             }
         }
     }
@@ -2694,7 +2817,7 @@ private fun SearchBrowse(
                 start = 16.dp,
                 end = 16.dp,
                 top = 10.dp,
-                bottom = 98.dp,
+                bottom = 124.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(11.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
