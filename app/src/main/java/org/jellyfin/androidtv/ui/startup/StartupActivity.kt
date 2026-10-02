@@ -3,6 +3,7 @@ package org.jellyfin.androidtv.ui.startup
 import android.Manifest
 import android.app.SearchManager
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +34,7 @@ import org.jellyfin.androidtv.databinding.ActivityStartupBinding
 import org.jellyfin.androidtv.ui.background.AppBackground
 import org.jellyfin.androidtv.ui.browsing.MainActivity
 import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
+import org.jellyfin.androidtv.ui.mobile.MobileStartupActivity
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.playback.MediaManager
@@ -84,6 +86,18 @@ class StartupActivity : FragmentActivity() {
 		applyTheme()
 
 		super.onCreate(savedInstanceState)
+
+		val deviceType = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
+		if (deviceType != Configuration.UI_MODE_TYPE_TELEVISION) {
+			val mobileIntent = Intent(this, MobileStartupActivity::class.java).apply {
+				action = intent.action
+				data = intent.data
+				putExtras(intent)
+			}
+			startActivity(mobileIntent)
+			finish()
+			return
+		}
 
 		binding = ActivityStartupBinding.inflate(layoutInflater)
 		binding.background.setContent { AppBackground() }
