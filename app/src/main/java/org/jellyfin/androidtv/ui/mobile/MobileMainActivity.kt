@@ -264,6 +264,7 @@ class MobileMainActivity : FragmentActivity() {
             }
 
             if (state.error == null) {
+                loadServiceLogos()
                 loadPopularity()
             }
         }
@@ -343,6 +344,53 @@ class MobileMainActivity : FragmentActivity() {
                 throw IllegalStateException(friendlyServiceError("Jellyfin", error), error)
             }
         }
+
+    private fun loadServiceLogos() {
+        val key = tmdbApiKey.trim()
+        if (key.isBlank()) return
+
+        lifecycleScope.launch {
+            val logos = withContext(Dispatchers.IO) {
+                fetchTmdbProviderLogos(key)
+            }
+            if (logos.isNotEmpty()) {
+                state = state.copy(serviceLogos = logos)
+            }
+        }
+    }
+
+    private fun fetchTmdbProviderLogos(apiKey: String): Map<String, String> = runCatching {
+        val encoded = URLEncoder.encode(apiKey, StandardCharsets.UTF_8.name())
+        buildMap {
+            listOf("movie", "tv").forEach { mediaType ->
+                val url = URL(
+                    "https://api.themoviedb.org/3/watch/providers/$mediaType?api_key=$encoded&watch_region=GB"
+                )
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 5000
+                    readTimeout = 10000
+                    setRequestProperty("Accept", "application/json")
+                }
+                if (connection.responseCode !in 200..299) {
+                    connection.disconnect()
+                    return@forEach
+                }
+
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                connection.disconnect()
+                val results = org.json.JSONObject(body).optJSONArray("results") ?: JSONArray()
+                for (index in 0 until results.length()) {
+                    val provider = results.optJSONObject(index) ?: continue
+                    val name = provider.optString("provider_name").trim().lowercase()
+                    val logoPath = provider.optString("logo_path").trim()
+                    if (name.isNotBlank() && logoPath.isNotBlank()) {
+                        put(name, "https://image.tmdb.org/t/p/w300$logoPath")
+                    }
+                }
+            }
+        }
+    }.getOrDefault(emptyMap())
 
     private fun loadPopularity() {
         val session = sessionRepository.currentSession.value
@@ -883,6 +931,7 @@ private data class MobileHomeState(
     val movies: List<BaseItemDto> = emptyList(),
     val shows: List<BaseItemDto> = emptyList(),
     val services: List<BaseItemDto> = emptyList(),
+    val serviceLogos: Map<String, String> = emptyMap(),
     val collections: List<BaseItemDto> = emptyList(),
 )
 
@@ -954,6 +1003,38 @@ private fun serviceSortOrder(item: BaseItemDto): Int {
 private fun serviceLogoResource(name: String?): Int? = when (serviceKey(name)) {
     "disney" -> R.drawable.logo_disneyplus
     else -> null
+}
+
+private fun serviceLogoUrl(
+    name: String?,
+    logos: Map<String, String>,
+): String? {
+    val normalized = serviceDisplayName(name).trim().lowercase()
+    val candidates = when {
+        normalized.contains("netflix") -> listOf("netflix")
+        normalized.contains("disney") -> listOf("disney plus", "disney+")
+        normalized.contains("amazon") || normalized.contains("prime") ->
+            listOf("amazon prime video", "prime video")
+        normalized.contains("apple") -> listOf("apple tv plus", "apple tv+", "apple tv")
+        normalized.contains("paramount") -> listOf("paramount plus", "paramount+")
+        normalized == "max" || normalized.contains("hbo") -> listOf("hbo max", "max")
+        normalized.startsWith("now") -> listOf("now", "now tv")
+        normalized.contains("iplayer") -> listOf("bbc iplayer")
+        normalized.contains("itvx") -> listOf("itvx")
+        normalized.contains("peacock") -> listOf("peacock")
+        normalized.contains("hulu") -> listOf("hulu")
+        else -> listOf(normalized)
+    }
+
+    candidates.forEach { candidate ->
+        logos[candidate]?.let { return it }
+    }
+
+    return logos.entries
+        .firstOrNull { (provider, _) ->
+            provider.contains(normalized) || normalized.contains(provider)
+        }
+        ?.value
 }
 
 private fun collectionDisplayName(name: String?): String =
@@ -1610,6 +1691,7 @@ private fun MobileHome(
                     nameFormatter = { serviceDisplayName(it.name) },
                     showFavorite = false,
                     providerTiles = true,
+                    providerLogos = state.serviceLogos,
                 )
             }
             if (state.collections.isNotEmpty()) item {
@@ -1865,6 +1947,7 @@ private fun MediaRow(
     nameFormatter: (BaseItemDto) -> String = { it.name ?: "Untitled" },
     showFavorite: Boolean = true,
     providerTiles: Boolean = false,
+    providerLogos: Map<String, String> = emptyMap(),
 ) {
     Column(Modifier.padding(top = 14.dp)) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
@@ -1894,6 +1977,7 @@ private fun MediaRow(
                     nameFormatter = nameFormatter,
                     showFavorite = showFavorite,
                     providerTile = providerTiles,
+                    providerLogos = providerLogos,
                 )
             }
         }
@@ -1910,6 +1994,7 @@ private fun MediaCard(
     nameFormatter: (BaseItemDto) -> String = { it.name ?: "Untitled" },
     showFavorite: Boolean = true,
     providerTile: Boolean = false,
+    providerLogos: Map<String, String> = emptyMap(),
 ) {
     val w = if (landscape) 210.dp else 132.dp
     val h = if (landscape) 122.dp else 198.dp
@@ -1932,6 +2017,7 @@ private fun MediaCard(
             if (providerTile) {
                 ProviderWordmark(
                     name = serviceDisplayName(item.name),
+                    logoUrl = serviceLogoUrl(item.name, providerLogos),
                     logoResource = serviceLogoResource(item.name),
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -2020,6 +2106,7 @@ private fun MediaCard(
 @Composable
 private fun ProviderWordmark(
     name: String,
+    logoUrl: String?,
     logoResource: Int?,
     modifier: Modifier = Modifier,
 ) {
@@ -2044,34 +2131,22 @@ private fun ProviderWordmark(
         modifier = modifier.background(background),
         contentAlignment = Alignment.Center,
     ) {
-        if (logoResource != null) {
-            val tint = when (key) {
-                "prime" -> ColorFilter.tint(Color(0xFF00A8E1))
-                "apple", "paramount", "max" -> ColorFilter.tint(Color.White)
-                else -> null
-            }
-
+        if (!logoUrl.isNullOrBlank()) {
+            AsyncImage(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 28.dp, vertical = 20.dp),
+                url = logoUrl,
+                scaleType = ImageView.ScaleType.FIT_CENTER,
+            )
+        } else if (logoResource != null) {
             Image(
                 painter = painterResource(logoResource),
                 contentDescription = displayName,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(
-                        horizontal = when (key) {
-                            "apple" -> 38.dp
-                            "paramount" -> 34.dp
-                            "max" -> 40.dp
-                            else -> 28.dp
-                        },
-                        vertical = when (key) {
-                            "apple" -> 28.dp
-                            "paramount" -> 30.dp
-                            "max" -> 32.dp
-                            else -> 22.dp
-                        },
-                    ),
+                    .padding(horizontal = 28.dp, vertical = 20.dp),
                 contentScale = ContentScale.Fit,
-                colorFilter = tint,
             )
         } else {
             BasicText(
