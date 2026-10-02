@@ -1001,7 +1001,13 @@ private fun serviceSortOrder(item: BaseItemDto): Int {
 }
 
 private fun serviceLogoResource(name: String?): Int? = when (serviceKey(name)) {
+    "netflix" -> R.drawable.service_netflix
+    "prime" -> R.drawable.service_prime_video
     "disney" -> R.drawable.logo_disneyplus
+    "apple" -> R.drawable.service_apple_tv
+    "paramount" -> R.drawable.service_paramount_plus
+    "max" -> R.drawable.service_max
+    "now" -> R.drawable.logo_now
     else -> null
 }
 
@@ -1485,7 +1491,7 @@ private fun MobileSectionTopBar(
                     letterSpacing = 0.3.sp,
                 ),
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(7.dp))
             BasicText(
                 title.uppercase() + "   ·   " + subtitle,
                 style = TextStyle(
@@ -1868,7 +1874,7 @@ private fun MobileTopBar(
                     letterSpacing = 0.3.sp,
                 ),
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(7.dp))
             BasicText(
                 "HOME   ·   VIDEO   ·   MUSIC   ·   BOOKS",
                 style = TextStyle(
@@ -2281,22 +2287,42 @@ private fun ProviderWordmark(
         modifier = modifier.background(background),
         contentAlignment = Alignment.Center,
     ) {
-        if (!logoUrl.isNullOrBlank()) {
+        if (logoResource != null) {
+            val tint = when (key) {
+                "prime" -> ColorFilter.tint(Color(0xFF00A8E1))
+                "apple", "paramount", "max" -> ColorFilter.tint(Color.White)
+                else -> null
+            }
+
+            Image(
+                painter = painterResource(logoResource),
+                contentDescription = displayName,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        horizontal = when (key) {
+                            "apple" -> 34.dp
+                            "paramount" -> 28.dp
+                            "max" -> 36.dp
+                            else -> 26.dp
+                        },
+                        vertical = when (key) {
+                            "apple" -> 24.dp
+                            "paramount" -> 25.dp
+                            "max" -> 28.dp
+                            else -> 19.dp
+                        },
+                    ),
+                contentScale = ContentScale.Fit,
+                colorFilter = tint,
+            )
+        } else if (!logoUrl.isNullOrBlank()) {
             AsyncImage(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 28.dp, vertical = 20.dp),
                 url = logoUrl,
                 scaleType = ImageView.ScaleType.FIT_CENTER,
-            )
-        } else if (logoResource != null) {
-            Image(
-                painter = painterResource(logoResource),
-                contentDescription = displayName,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 28.dp, vertical = 20.dp),
-                contentScale = ContentScale.Fit,
             )
         } else {
             BasicText(
@@ -3146,7 +3172,7 @@ private fun MobileNavDock(
                             fontWeight = FontWeight.Bold,
                         ),
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(7.dp))
                     BasicText(
                         tab.label,
                         style = TextStyle(
