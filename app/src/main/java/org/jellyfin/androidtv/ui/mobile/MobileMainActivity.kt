@@ -15,6 +15,7 @@ import android.widget.LinearLayout
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.VesperServiceConfig
 import androidx.compose.ui.res.painterResource
@@ -967,11 +968,21 @@ private fun collectionDisplayName(name: String?): String =
 
 private enum class MobileTab(val label: String, val icon: String) {
     HOME("Home", "⌂"),
+    VIDEO("Video", "▣"),
+    MUSIC("Music", "♫"),
+    BOOKS("Books", "▤"),
     MOVIES("Movies", "▣"),
     TV("TV", "▤"),
     MYV("MyV", "♥"),
     SEARCH("Search", "⌕"),
 }
+
+private val primaryMobileTabs = listOf(
+    MobileTab.HOME,
+    MobileTab.VIDEO,
+    MobileTab.MUSIC,
+    MobileTab.BOOKS,
+)
 
 @Composable
 private fun VesperMobile(
@@ -1021,7 +1032,17 @@ private fun VesperMobile(
                 MobileDetails(selected, api, onBack, onPlay, onToggleFavorite)
             }
         } else {
-            BackHandler(enabled = tab != MobileTab.HOME) { tab = MobileTab.HOME }
+            BackHandler(enabled = tab != MobileTab.HOME) {
+                tab = when (tab) {
+                    MobileTab.MOVIES, MobileTab.TV, MobileTab.MYV -> MobileTab.VIDEO
+                    else -> MobileTab.HOME
+                }
+            }
+
+            val openTab: (MobileTab) -> Unit = { destination ->
+                tab = destination
+                onTabSelected(destination)
+            }
 
             when (tab) {
                 MobileTab.HOME -> MobileHome(
@@ -1037,6 +1058,30 @@ private fun VesperMobile(
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
                     expanded = expanded,
+                )
+                MobileTab.VIDEO -> VideoHub(
+                    state = state,
+                    popularity = popularity,
+                    popularityScope = popularityScope,
+                    userName = userName,
+                    api = api,
+                    onSelect = onSelect,
+                    onPlay = onPlay,
+                    onToggleFavorite = onToggleFavorite,
+                    onSwitchProfile = onSwitchProfile,
+                    onSettings = onSettings,
+                    onOpenTab = openTab,
+                    expanded = expanded,
+                )
+                MobileTab.MUSIC -> MusicHub(
+                    userName = userName,
+                    onSwitchProfile = onSwitchProfile,
+                    onSettings = onSettings,
+                )
+                MobileTab.BOOKS -> BooksHub(
+                    userName = userName,
+                    onSwitchProfile = onSwitchProfile,
+                    onSettings = onSettings,
                 )
                 MobileTab.MOVIES -> LibraryBrowse(
                     title = "Movies",
@@ -1084,16 +1129,405 @@ private fun VesperMobile(
                 )
             }
 
-            MobileBottomNav(
+            MobileNavDock(
                 active = tab,
-                onSelect = {
-                    tab = it
-                    onTabSelected(it)
-                },
+                onSelect = openTab,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
 
+    }
+}
+
+@Composable
+private fun VideoHub(
+    state: MobileHomeState,
+    popularity: PopularityState,
+    popularityScope: PopularityScope,
+    userName: String,
+    api: ApiClient,
+    onSelect: (BaseItemDto) -> Unit,
+    onPlay: (BaseItemDto) -> Unit,
+    onToggleFavorite: (BaseItemDto) -> Unit,
+    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
+    onOpenTab: (MobileTab) -> Unit,
+    expanded: Boolean,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 118.dp),
+    ) {
+        item {
+            MobileSectionTopBar(
+                title = "Video",
+                subtitle = "Movies, TV, services and collections",
+                userName = userName,
+                onSwitchProfile = onSwitchProfile,
+                onSettings = onSettings,
+            )
+        }
+
+        item {
+            LazyRow(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item { HubChip("Movies") { onOpenTab(MobileTab.MOVIES) } }
+                item { HubChip("TV Shows") { onOpenTab(MobileTab.TV) } }
+                item { HubChip("MyV") { onOpenTab(MobileTab.MYV) } }
+            }
+        }
+
+        val hero = state.continueWatching.firstOrNull()
+        if (hero != null) {
+            item {
+                VesperHero(
+                    item = hero,
+                    api = api,
+                    expanded = expanded,
+                    onPlay = onPlay,
+                    onInfo = { onSelect(hero) },
+                    onToggleFavorite = { onToggleFavorite(hero) },
+                )
+            }
+        }
+
+        if (state.continueWatching.isNotEmpty()) item {
+            MediaRow("Continue Watching", state.continueWatching, api, onSelect, onToggleFavorite, landscape = true)
+        }
+
+        val movies = sortByPopularity(state.movies, popularity, popularityScope)
+        if (movies.isNotEmpty()) item {
+            MediaRow("Movies", movies, api, onSelect, onToggleFavorite)
+        }
+
+        val shows = sortByPopularity(state.shows, popularity, popularityScope)
+        if (shows.isNotEmpty()) item {
+            MediaRow("TV Shows", shows, api, onSelect, onToggleFavorite)
+        }
+
+        if (state.services.isNotEmpty()) item {
+            MediaRow(
+                title = "Services",
+                media = state.services,
+                api = api,
+                onSelect = onSelect,
+                onToggleFavorite = onToggleFavorite,
+                landscape = true,
+                nameFormatter = { serviceDisplayName(it.name) },
+                showFavorite = false,
+                providerTiles = true,
+            )
+        }
+
+        if (state.collections.isNotEmpty()) item {
+            MediaRow(
+                title = "Collections",
+                media = state.collections,
+                api = api,
+                onSelect = onSelect,
+                onToggleFavorite = onToggleFavorite,
+                landscape = true,
+                nameFormatter = { collectionDisplayName(it.name) },
+                showFavorite = false,
+            )
+        }
+
+        val myV = sortByPopularity(state.myV, popularity, popularityScope)
+        if (myV.isNotEmpty()) item {
+            MediaRow("MyV", myV, api, onSelect, onToggleFavorite)
+        }
+    }
+}
+
+@Composable
+private fun MusicHub(
+    userName: String,
+    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 118.dp),
+    ) {
+        item {
+            MobileSectionTopBar(
+                title = "Music",
+                subtitle = "Your library, radio and room playback",
+                userName = userName,
+                onSwitchProfile = onSwitchProfile,
+                onSettings = onSettings,
+            )
+        }
+
+        item {
+            PlaceholderHero(
+                eyebrow = "MUSIC",
+                title = "A deeper listen",
+                subtitle = "Music Assistant will power your library, playback, queues and rooms.",
+                action = "Music integration next",
+                icon = "♫",
+            )
+        }
+
+        item {
+            PlaceholderTileRow(
+                title = "Your music",
+                items = listOf(
+                    "Recently played" to "Pick up where you left off",
+                    "Artists" to "Browse your library",
+                    "Albums" to "Your local collection",
+                    "Radio" to "Clyde 1 and favourites",
+                ),
+            )
+        }
+
+        item {
+            PlaceholderTileRow(
+                title = "Around the house",
+                items = listOf(
+                    "Living Room" to "Room playback",
+                    "Den" to "Room playback",
+                    "Kitchen" to "Room playback",
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun BooksHub(
+    userName: String,
+    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 118.dp),
+    ) {
+        item {
+            MobileSectionTopBar(
+                title = "Books",
+                subtitle = "Ebooks and audiobooks in one place",
+                userName = userName,
+                onSwitchProfile = onSwitchProfile,
+                onSettings = onSettings,
+            )
+        }
+
+        item {
+            PlaceholderHero(
+                eyebrow = "BOOKS",
+                title = "Read or listen",
+                subtitle = "A clean Kindle-style reader and audiobooks will live together here.",
+                action = "Book library later",
+                icon = "▤",
+            )
+        }
+
+        item {
+            PlaceholderTileRow(
+                title = "Library",
+                items = listOf(
+                    "Continue reading" to "Resume on any device",
+                    "Continue listening" to "Audiobooks",
+                    "New books" to "Recently added",
+                    "MyV" to "Saved favourites",
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MobileSectionTopBar(
+    title: String,
+    subtitle: String,
+    userName: String,
+    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 18.dp, top = 16.dp, bottom = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                title,
+                style = TextStyle(color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold),
+            )
+            BasicText(
+                subtitle,
+                style = TextStyle(color = Color(0xFF8190A1), fontSize = 12.sp),
+            )
+        }
+
+        Box {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(21.dp))
+                    .background(Color(0xFF1B1B49))
+                    .border(1.dp, Color(0x444F46E5), RoundedCornerShape(21.dp))
+                    .clickable { onSwitchProfile() },
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    userName.take(1).uppercase(),
+                    style = TextStyle(color = Color(0xFFC8C2FF), fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(15.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF101821))
+                    .clickable { onSettings() },
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText("•", style = TextStyle(color = Color(0xFF8A96A5), fontSize = 12.sp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun HubChip(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xB51B2230))
+            .border(1.dp, Color(0x334D65FF), RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(color = Color(0xFFE8EBF3), fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+        )
+    }
+}
+
+@Composable
+private fun PlaceholderHero(
+    eyebrow: String,
+    title: String,
+    subtitle: String,
+    action: String,
+    icon: String,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF17162B),
+                        Color(0xFF0D1622),
+                        Color(0xFF10141B),
+                    )
+                )
+            )
+            .border(1.dp, Color(0x334D65FF), RoundedCornerShape(24.dp))
+            .padding(20.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(76.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Color(0x332F6BFF)),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    icon,
+                    style = TextStyle(color = Color(0xFFA891FF), fontSize = 38.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f)) {
+                BasicText(
+                    eyebrow,
+                    style = TextStyle(
+                        color = Color(0xFF9D82FF),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp,
+                    ),
+                )
+                Spacer(Modifier.height(5.dp))
+                BasicText(
+                    title,
+                    style = TextStyle(color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold),
+                )
+                Spacer(Modifier.height(6.dp))
+                BasicText(
+                    subtitle,
+                    style = TextStyle(color = Color(0xFFA7B1BD), fontSize = 13.sp, lineHeight = 18.sp),
+                )
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color(0x222F6BFF))
+                        .padding(horizontal = 13.dp, vertical = 7.dp),
+                ) {
+                    BasicText(
+                        action,
+                        style = TextStyle(color = Color(0xFFB8ABFF), fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaceholderTileRow(
+    title: String,
+    items: List<Pair<String, String>>,
+) {
+    Column(Modifier.padding(top = 12.dp)) {
+        BasicText(
+            title,
+            style = TextStyle(color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(items) { item ->
+                Column(
+                    modifier = Modifier
+                        .width(178.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xB5151B25))
+                        .border(1.dp, Color(0x223D4F73), RoundedCornerShape(20.dp))
+                        .padding(16.dp),
+                ) {
+                    BasicText(
+                        item.first,
+                        style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    BasicText(
+                        item.second,
+                        style = TextStyle(color = Color(0xFF8290A0), fontSize = 12.sp),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1114,7 +1548,7 @@ private fun MobileHome(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 92.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 118.dp),
     ) {
         item {
             MobileTopBar(
@@ -1961,7 +2395,7 @@ private fun LibraryBrowse(
                     start = 16.dp,
                     end = 16.dp,
                     top = 8.dp,
-                    bottom = 98.dp,
+                    bottom = 118.dp,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(11.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -2445,47 +2879,91 @@ private fun GridMediaCard(
 }
 
 @Composable
-private fun MobileBottomNav(
+private fun MobileNavDock(
     active: MobileTab,
     onSelect: (MobileTab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    val highlighted = when (active) {
+        MobileTab.MOVIES, MobileTab.TV, MobileTab.MYV -> MobileTab.VIDEO
+        else -> active
+    }
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xF405080C))
-            .padding(start = 6.dp, end = 6.dp, top = 8.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(start = 18.dp, end = 18.dp, bottom = 14.dp),
     ) {
-        MobileTab.entries.forEach { tab ->
-            val selected = tab == active
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(13.dp))
-                    .clickable { onSelect(tab) }
-                    .background(if (selected) Color(0xFF101C25) else Color.Transparent)
-                    .padding(vertical = 7.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                BasicText(
-                    tab.icon,
-                    style = TextStyle(
-                        color = if (selected) Color(0xFFBDEBFF) else Color(0xFF7C8996),
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                )
-                Spacer(Modifier.height(2.dp))
-                BasicText(
-                    tab.label,
-                    style = TextStyle(
-                        color = if (selected) Color.White else Color(0xFF7C8996),
-                        fontSize = 10.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    ),
-                )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 72.dp)
+                .clip(RoundedCornerShape(29.dp))
+                .background(Color(0xE51B1C2A))
+                .border(1.dp, Color(0x554C4D7B), RoundedCornerShape(29.dp))
+                .padding(horizontal = 7.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            primaryMobileTabs.forEach { tab ->
+                val selected = tab == highlighted
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(
+                            if (selected) Color(0x443D2D9B)
+                            else Color.Transparent
+                        )
+                        .clickable { onSelect(tab) }
+                        .padding(vertical = 7.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    BasicText(
+                        tab.icon,
+                        style = TextStyle(
+                            color = if (selected) Color(0xFFA891FF) else Color(0xFFC3C8D2),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    BasicText(
+                        tab.label,
+                        style = TextStyle(
+                            color = if (selected) Color(0xFFA891FF) else Color(0xFFB4BBC6),
+                            fontSize = 10.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        ),
+                    )
+                }
             }
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(58.dp)
+                .clip(RoundedCornerShape(29.dp))
+                .background(
+                    if (active == MobileTab.SEARCH) Color(0xFF476DFF)
+                    else Color(0xE52B2D3C)
+                )
+                .border(
+                    1.dp,
+                    if (active == MobileTab.SEARCH) Color(0xFF87B5FF) else Color(0x665A5D75),
+                    RoundedCornerShape(29.dp),
+                )
+                .clickable { onSelect(MobileTab.SEARCH) },
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                "⌕",
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Normal,
+                ),
+            )
         }
     }
 }
