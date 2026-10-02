@@ -952,12 +952,7 @@ private fun serviceSortOrder(item: BaseItemDto): Int {
 }
 
 private fun serviceLogoResource(name: String?): Int? = when (serviceKey(name)) {
-    "netflix" -> R.drawable.service_netflix
-    "prime" -> R.drawable.service_prime_video
     "disney" -> R.drawable.logo_disneyplus
-    "apple" -> R.drawable.service_apple_tv
-    "paramount" -> R.drawable.service_paramount_plus
-    "max" -> R.drawable.service_max
     else -> null
 }
 
