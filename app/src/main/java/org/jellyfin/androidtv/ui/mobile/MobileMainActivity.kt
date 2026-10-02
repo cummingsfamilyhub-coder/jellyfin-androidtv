@@ -1427,36 +1427,47 @@ private fun MobileSectionTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 18.dp, top = 16.dp, bottom = 14.dp),
+            .padding(start = 20.dp, end = 18.dp, top = 14.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             BasicText(
-                title,
-                style = TextStyle(color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold),
+                "Vesper",
+                style = TextStyle(
+                    color = Color(0xFFB8A0FF),
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.3.sp,
+                ),
             )
+            Spacer(Modifier.height(2.dp))
             BasicText(
-                subtitle,
-                style = TextStyle(color = Color(0xFF8190A1), fontSize = 12.sp),
+                title.uppercase() + "   ·   " + subtitle,
+                style = TextStyle(
+                    color = Color(0xFF8C88B7),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 1.3.sp,
+                ),
+                maxLines = 1,
             )
         }
 
         Box {
             Box(
                 modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(21.dp))
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(22.dp))
                     .background(Color(0xFF1B1B49))
-                    .border(1.dp, Color(0x444F46E5), RoundedCornerShape(21.dp))
+                    .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
                     .clickable { onSwitchProfile() },
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(
                     userName.take(1).uppercase(),
-                    style = TextStyle(color = Color(0xFFC8C2FF), fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = Color(0xFFD0C6FF), fontSize = 17.sp, fontWeight = FontWeight.Bold),
                 )
             }
-
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -1721,40 +1732,44 @@ private fun MobileTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 20.dp, end = 18.dp, top = 14.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Image(
-            painter = painterResource(R.drawable.vesper_icon),
-            contentDescription = "Vesper",
-            modifier = Modifier
-                .size(46.dp)
-                .clip(RoundedCornerShape(13.dp)),
-        )
-        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             BasicText(
                 "Vesper",
-                style = TextStyle(color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold),
+                style = TextStyle(
+                    color = Color(0xFFB8A0FF),
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.3.sp,
+                ),
             )
+            Spacer(Modifier.height(2.dp))
             BasicText(
-                "Your library",
-                style = TextStyle(color = Color(0xFF8492A0), fontSize = 12.sp),
+                "HOME   ·   VIDEO   ·   MUSIC   ·   BOOKS",
+                style = TextStyle(
+                    color = Color(0xFF8C88B7),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 1.8.sp,
+                ),
             )
         }
 
         Box {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFF172632))
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Color(0xFF1B1B49))
+                    .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
                     .clickable { menuOpen = true },
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(
                     userName.take(1).uppercase(),
-                    style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = Color(0xFFD0C6FF), fontSize = 17.sp, fontWeight = FontWeight.Bold),
                 )
             }
 
@@ -1767,8 +1782,9 @@ private fun MobileTopBar(
                     Column(
                         modifier = Modifier
                             .width(220.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFF111922))
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xF21A1C2A))
+                            .border(1.dp, Color(0x554C4D7B), RoundedCornerShape(18.dp))
                             .padding(10.dp),
                     ) {
                         BasicText(
@@ -1827,15 +1843,16 @@ private fun VesperHero(
     onToggleFavorite: () -> Unit,
 ) {
     val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages[ImageType.PRIMARY]
-    val heroHeight = if (expanded) 390.dp else 330.dp
+    val heroHeight = if (expanded) 330.dp else 245.dp
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(heroHeight)
-            .padding(horizontal = if (expanded) 22.dp else 12.dp)
-            .clip(RoundedCornerShape(if (expanded) 22.dp else 18.dp))
-            .background(Color(0xFF111820)),
+            .padding(horizontal = 18.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(if (expanded) 24.dp else 20.dp))
+            .background(Color(0xFF111820))
+            .border(1.dp, Color(0x334E4B80), RoundedCornerShape(if (expanded) 24.dp else 20.dp)),
     ) {
         AsyncImage(
             modifier = Modifier.fillMaxSize(),
@@ -1848,13 +1865,27 @@ private fun VesperHero(
             Modifier
                 .fillMaxSize()
                 .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xF20A0B12),
+                            Color(0xA10A0B12),
+                            Color(0x220A0B12),
+                            Color.Transparent,
+                        )
+                    )
+                )
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
                     Brush.verticalGradient(
                         colors = listOf(
                             Color.Transparent,
-                            Color(0x2205080C),
-                            Color(0xF205080C),
+                            Color(0x1005080C),
+                            Color(0xC805080C),
                         ),
-                        startY = 80f,
+                        startY = 90f,
                     )
                 )
         )
@@ -1862,26 +1893,26 @@ private fun VesperHero(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(if (expanded) .58f else .92f)
-                .padding(22.dp),
+                .fillMaxWidth(if (expanded) .62f else .78f)
+                .padding(start = 20.dp, end = 12.dp, bottom = 18.dp),
         ) {
             BasicText(
                 if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "CONTINUE WATCHING" else "FEATURED",
                 style = TextStyle(
-                    color = Color(0xFFBCEBFF),
-                    fontSize = 11.sp,
+                    color = Color(0xFFA98CFF),
+                    fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.2.sp,
+                    letterSpacing = 1.8.sp,
                 ),
             )
-            Spacer(Modifier.height(7.dp))
+            Spacer(Modifier.height(5.dp))
             BasicText(
                 item.name ?: "Untitled",
                 style = TextStyle(
                     color = Color.White,
-                    fontSize = if (expanded) 42.sp else 34.sp,
+                    fontSize = if (expanded) 35.sp else 27.sp,
                     fontWeight = FontWeight.Bold,
-                    lineHeight = if (expanded) 45.sp else 37.sp,
+                    lineHeight = if (expanded) 38.sp else 29.sp,
                 ),
                 maxLines = 2,
             )
@@ -1901,24 +1932,16 @@ private fun VesperHero(
             ).filter { it.isNotBlank() }.joinToString("  •  ")
 
             if (metadata.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 BasicText(
                     metadata,
-                    style = TextStyle(color = Color(0xFFC1CAD3), fontSize = 13.sp),
+                    style = TextStyle(color = Color(0xFFB7BDC9), fontSize = 11.sp),
+                    maxLines = 1,
                 )
             }
 
-            if (!expanded && !item.overview.isNullOrBlank()) {
-                Spacer(Modifier.height(10.dp))
-                BasicText(
-                    item.overview.orEmpty(),
-                    style = TextStyle(color = Color(0xFFD4DAE0), fontSize = 14.sp, lineHeight = 19.sp),
-                    maxLines = 2,
-                )
-            }
-
-            Spacer(Modifier.height(15.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 VesperButton(
                     if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
                     { onPlay(item) },
@@ -1931,8 +1954,6 @@ private fun VesperHero(
             }
         }
     }
-
-    Spacer(Modifier.height(12.dp))
 }
 
 @Composable
@@ -1949,23 +1970,28 @@ private fun MediaRow(
     providerTiles: Boolean = false,
     providerLogos: Map<String, String> = emptyMap(),
 ) {
-    Column(Modifier.padding(top = 14.dp)) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+    Column(Modifier.padding(top = 10.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             BasicText(
-                title,
-                style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                "$title  ›",
+                style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                modifier = Modifier.weight(1f),
             )
             if (!subtitle.isNullOrBlank()) {
-                Spacer(Modifier.height(2.dp))
                 BasicText(
                     subtitle,
-                    style = TextStyle(color = Color(0xFF6F7E8C), fontSize = 11.sp),
+                    style = TextStyle(color = Color(0xFF7775A3), fontSize = 10.sp),
                 )
             }
         }
         LazyRow(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(media, key = { it.id }) { item ->
                 MediaCard(
@@ -1996,8 +2022,8 @@ private fun MediaCard(
     providerTile: Boolean = false,
     providerLogos: Map<String, String> = emptyMap(),
 ) {
-    val w = if (landscape) 210.dp else 132.dp
-    val h = if (landscape) 122.dp else 198.dp
+    val w = if (landscape) 158.dp else 118.dp
+    val h = if (landscape) 94.dp else 174.dp
     val image = if (landscape) {
         item.itemBackdropImages.firstOrNull() ?: item.itemImages[ImageType.PRIMARY]
     } else {
@@ -2011,8 +2037,9 @@ private fun MediaCard(
             modifier = Modifier
                 .width(w)
                 .height(h)
-                .clip(RoundedCornerShape(13.dp))
-                .background(Color(0xFF111A23)),
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF111A23))
+                .border(1.dp, Color(0x223D4F73), RoundedCornerShape(14.dp)),
         ) {
             if (providerTile) {
                 ProviderWordmark(
@@ -2034,10 +2061,10 @@ private fun MediaCard(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(7.dp)
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0x9905080C))
+                        .padding(6.dp)
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xA805080C))
                         .clickable { onToggleFavorite(item) },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -2045,7 +2072,7 @@ private fun MediaCard(
                         if (item.userData?.isFavorite == true) "♥" else "♡",
                         style = TextStyle(
                             color = if (item.userData?.isFavorite == true) Color(0xFFFF4D7A) else Color.White,
-                            fontSize = 18.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                         ),
                     )
@@ -2062,13 +2089,13 @@ private fun MediaCard(
                             .align(Alignment.BottomStart)
                             .fillMaxWidth()
                             .height(3.dp)
-                            .background(Color(0x55000000))
+                            .background(Color(0x66000000))
                     ) {
                         Box(
                             Modifier
                                 .fillMaxWidth(progress)
                                 .height(3.dp)
-                                .background(Color(0xFF8BD8FF))
+                                .background(Color(0xFF825CFF))
                         )
                     }
                 }
@@ -2076,10 +2103,10 @@ private fun MediaCard(
         }
 
         if (!providerTile) {
-            Spacer(Modifier.height(7.dp))
+            Spacer(Modifier.height(6.dp))
             BasicText(
                 nameFormatter(item),
-                style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
                 maxLines = 1,
             )
         }
@@ -2096,7 +2123,7 @@ private fun MediaCard(
         if (!providerTile && secondary.isNotBlank() && item.type != BaseItemKind.BOX_SET) {
             BasicText(
                 secondary,
-                style = TextStyle(color = Color(0xFF8F9CAA), fontSize = 12.sp),
+                style = TextStyle(color = Color(0xFF7F8793), fontSize = 11.sp),
                 maxLines = 1,
             )
         }
