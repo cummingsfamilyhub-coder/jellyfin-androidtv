@@ -35,6 +35,7 @@ android {
 		val keystorePassword = getProperty("keystore.password")
 		val signingKeyAlias = getProperty("signing.key.alias")
 		val signingKeyPassword = getProperty("signing.key.password")
+		val vesperDebugKeystore = rootProject.file(".github/vesper-debug.keystore")
 
 		if (keystoreFile != null && keystorePassword != null && signingKeyAlias != null && signingKeyPassword != null) {
 			create("release") {
@@ -42,6 +43,15 @@ android {
 				storePassword = keystorePassword
 				keyAlias = signingKeyAlias
 				keyPassword = signingKeyPassword
+			}
+		}
+
+		if (vesperDebugKeystore.exists()) {
+			create("vesperDebug") {
+				storeFile = vesperDebugKeystore
+				storePassword = "android"
+				keyAlias = "androiddebugkey"
+				keyPassword = "android"
 			}
 		}
 	}
@@ -69,6 +79,8 @@ android {
 		}
 
 		debug {
+			signingConfigs.findByName("vesperDebug")?.let { signingConfig = it }
+
 			// Use different application id to run release and debug at the same time
 			applicationIdSuffix = ".debug"
 
