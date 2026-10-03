@@ -859,14 +859,14 @@ class MobileMainActivity : FragmentActivity() {
         })
 
         container.addView(TextView(this).apply {
-            text = "Music Assistant"
+            text = getString(R.string.vesper_music_assistant)
             textSize = 15f
             setPadding(0, dp(14), 0, dp(4))
         })
 
         val musicUrlInput = EditText(this).apply {
             setText(musicAssistantBaseUrl)
-            hint = "http://192.168.1.34:8095"
+            hint = getString(R.string.vesper_music_assistant_url_hint)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             setSelectAllOnFocus(false)
             setSingleLine(true)
@@ -874,14 +874,14 @@ class MobileMainActivity : FragmentActivity() {
         container.addView(musicUrlInput)
 
         container.addView(TextView(this).apply {
-            text = "Long-lived Music Assistant token"
+            text = getString(R.string.vesper_music_assistant_token_label)
             textSize = 15f
             setPadding(0, dp(12), 0, dp(4))
         })
 
         val musicTokenInput = EditText(this).apply {
             setText(musicAssistantToken)
-            hint = "Long-lived access token"
+            hint = getString(R.string.vesper_music_assistant_token_hint)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setSelectAllOnFocus(false)
             setSingleLine(true)
@@ -889,7 +889,7 @@ class MobileMainActivity : FragmentActivity() {
         container.addView(musicTokenInput)
 
         container.addView(TextView(this).apply {
-            text = "Create one in Music Assistant → Settings → Profile. Vesper uses it for your music library, rooms and playback."
+            text = getString(R.string.vesper_music_assistant_setup_help)
             textSize = 12f
             alpha = 0.72f
             setPadding(0, 0, 0, dp(8))
