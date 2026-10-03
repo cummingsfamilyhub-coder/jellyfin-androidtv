@@ -9,6 +9,7 @@ import android.app.AlertDialog
 import android.os.Bundle
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import android.widget.RadioGroup
 import android.widget.RadioButton
 import android.widget.LinearLayout
@@ -114,9 +115,12 @@ class MobileMainActivity : FragmentActivity() {
 
     private var state by mutableStateOf(MobileHomeState())
     private var popularity by mutableStateOf(PopularityState())
+    private var musicState by mutableStateOf(MusicUiState())
     private var selected by mutableStateOf<BaseItemDto?>(null)
     private var tmdbApiKey by mutableStateOf("")
     private var seerrApiKey by mutableStateOf("")
+    private var musicAssistantBaseUrl by mutableStateOf("")
+    private var musicAssistantToken by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
     private val hydratedTabs = mutableSetOf<MobileTab>()
     private val loadingTabs = mutableSetOf<MobileTab>()
@@ -137,6 +141,12 @@ class MobileMainActivity : FragmentActivity() {
         seerrApiKey = vesperPreferences
             .getString("seerr_api_key", "")
             .orEmpty()
+        musicAssistantBaseUrl = vesperPreferences
+            .getString("music_assistant_url", "http://192.168.1.34:8095")
+            .orEmpty()
+        musicAssistantToken = vesperPreferences
+            .getString("music_assistant_token", "")
+            .orEmpty()
         if (vesperPreferences.contains("seerr_url")) {
             vesperPreferences.edit().remove("seerr_url").apply()
         }
@@ -152,6 +162,8 @@ class MobileMainActivity : FragmentActivity() {
                 state = state,
                 popularity = popularity,
                 popularityScope = popularityScope,
+                musicState = musicState,
+                musicConfigured = musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank(),
                 tmdbConfigured = tmdbApiKey.isNotBlank(),
                 selected = selected,
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
@@ -167,6 +179,8 @@ class MobileMainActivity : FragmentActivity() {
                 onToggleFavorite = ::toggleFavorite,
                 onSwitchProfile = ::switchProfile,
                 onTabSelected = ::loadLibraryTab,
+                onRetryMusic = ::loadMusic,
+                onPlayMusic = ::playMusic,
                 onSettings = ::openSettings,
             )
         }
@@ -271,6 +285,12 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun loadLibraryTab(tab: MobileTab) {
+        if (tab == MobileTab.MUSIC) {
+            if (!musicState.loading && !musicState.loaded && musicAssistantToken.isNotBlank()) {
+                loadMusic()
+            }
+            return
+        }
         if (tab !in setOf(MobileTab.MOVIES, MobileTab.TV, MobileTab.MYV)) return
         if (tab in hydratedTabs || tab in loadingTabs) return
 
@@ -691,6 +711,65 @@ class MobileMainActivity : FragmentActivity() {
             }
         }
 
+    private fun loadMusic() {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) {
+            musicState = MusicUiState(
+                error = "Connect Music Assistant in Vesper settings first."
+            )
+            return
+        }
+
+        musicState = musicState.copy(loading = true, error = null)
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    MusicAssistantClient(
+                        baseUrl = musicAssistantBaseUrl,
+                        token = musicAssistantToken,
+                    ).loadSnapshot()
+                }
+            }.onSuccess { snapshot ->
+                musicState = MusicUiState(
+                    loaded = true,
+                    snapshot = snapshot,
+                )
+            }.onFailure { error ->
+                musicState = MusicUiState(
+                    error = error.message ?: "Couldn't load Music Assistant."
+                )
+            }
+        }
+    }
+
+    private fun playMusic(item: MaMediaItem, player: MaPlayer) {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    MusicAssistantClient(
+                        baseUrl = musicAssistantBaseUrl,
+                        token = musicAssistantToken,
+                    ).play(item, player.playerId)
+                }
+            }.onSuccess {
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    "Playing ${item.name} in ${player.name}",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                delay(700)
+                loadMusic()
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    error.message ?: "Couldn't start playback.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
     private fun openSettings() {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
@@ -778,12 +857,51 @@ class MobileMainActivity : FragmentActivity() {
             setPadding(0, 0, 0, dp(8))
         })
 
+        container.addView(TextView(this).apply {
+            text = "Music Assistant"
+            textSize = 15f
+            setPadding(0, dp(14), 0, dp(4))
+        })
+
+        val musicUrlInput = EditText(this).apply {
+            setText(musicAssistantBaseUrl)
+            hint = "http://192.168.1.34:8095"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setSelectAllOnFocus(false)
+            setSingleLine(true)
+        }
+        container.addView(musicUrlInput)
+
+        container.addView(TextView(this).apply {
+            text = "Long-lived Music Assistant token"
+            textSize = 15f
+            setPadding(0, dp(12), 0, dp(4))
+        })
+
+        val musicTokenInput = EditText(this).apply {
+            setText(musicAssistantToken)
+            hint = "Long-lived access token"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSelectAllOnFocus(false)
+            setSingleLine(true)
+        }
+        container.addView(musicTokenInput)
+
+        container.addView(TextView(this).apply {
+            text = "Create one in Music Assistant → Settings → Profile. Vesper uses it for your music library, rooms and playback."
+            textSize = 12f
+            alpha = 0.72f
+            setPadding(0, 0, 0, dp(8))
+        })
+
         AlertDialog.Builder(this)
             .setTitle("Vesper settings")
             .setView(container)
             .setPositiveButton("Save") { _, _ ->
                 tmdbApiKey = input.text?.toString()?.trim().orEmpty()
                 seerrApiKey = seerrKeyInput.text?.toString()?.trim().orEmpty()
+                musicAssistantBaseUrl = musicUrlInput.text?.toString()?.trim()?.trimEnd('/').orEmpty()
+                musicAssistantToken = musicTokenInput.text?.toString()?.trim().orEmpty()
                 popularityScope = if (localRadio.isChecked) {
                     PopularityScope.LOCAL
                 } else {
@@ -795,10 +913,16 @@ class MobileMainActivity : FragmentActivity() {
                     .putString("tmdb_api_key", tmdbApiKey)
                     .remove("seerr_url")
                     .putString("seerr_api_key", seerrApiKey)
+                    .putString("music_assistant_url", musicAssistantBaseUrl)
+                    .putString("music_assistant_token", musicAssistantToken)
                     .putString("popularity_scope", popularityScope.name)
                     .apply()
 
                 loadPopularity()
+                musicState = MusicUiState()
+                if (musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank()) {
+                    loadMusic()
+                }
             }
             .setNeutralButton("Jellyfin settings") { _, _ ->
                 startActivity(Intent(this, PreferencesActivity::class.java))
@@ -814,6 +938,13 @@ class MobileMainActivity : FragmentActivity() {
         )
     }
 }
+
+private data class MusicUiState(
+    val loading: Boolean = false,
+    val loaded: Boolean = false,
+    val error: String? = null,
+    val snapshot: MusicAssistantSnapshot = MusicAssistantSnapshot(),
+)
 
 private data class PopularityState(
     val localMovies: Map<String, Int> = emptyMap(),
@@ -1071,6 +1202,8 @@ private fun VesperMobile(
     state: MobileHomeState,
     popularity: PopularityState,
     popularityScope: PopularityScope,
+    musicState: MusicUiState,
+    musicConfigured: Boolean,
     tmdbConfigured: Boolean,
     selected: BaseItemDto?,
     userName: String,
@@ -1086,6 +1219,8 @@ private fun VesperMobile(
     onToggleFavorite: (BaseItemDto) -> Unit,
     onSwitchProfile: () -> Unit,
     onTabSelected: (MobileTab) -> Unit,
+    onRetryMusic: () -> Unit,
+    onPlayMusic: (MaMediaItem, MaPlayer) -> Unit,
     onSettings: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
@@ -1156,7 +1291,11 @@ private fun VesperMobile(
                     expanded = expanded,
                 )
                 MobileTab.MUSIC -> MusicHub(
+                    state = musicState,
+                    configured = musicConfigured,
                     userName = userName,
+                    onRetry = onRetryMusic,
+                    onPlay = onPlayMusic,
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
                 )
