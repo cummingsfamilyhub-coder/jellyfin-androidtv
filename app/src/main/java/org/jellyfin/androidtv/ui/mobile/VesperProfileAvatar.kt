@@ -4,7 +4,7 @@ import android.widget.ImageView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -25,7 +25,7 @@ internal fun VesperProfileAvatar(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(9999))
+            .clip(CircleShape)
             .background(
                 Brush.linearGradient(
                     listOf(Color(0xFF3E2C79), Color(0xFF1B3457))
