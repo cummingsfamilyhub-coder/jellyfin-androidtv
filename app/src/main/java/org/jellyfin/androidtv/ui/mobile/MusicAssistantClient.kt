@@ -328,6 +328,7 @@ internal class MusicAssistantClient(
 
         return MaPlayer(
             playerId = id,
+            provider = json.optString("provider"),
             name = name,
             type = json.optString("type").ifBlank { "player" },
             available = json.optBoolean("available", true),
