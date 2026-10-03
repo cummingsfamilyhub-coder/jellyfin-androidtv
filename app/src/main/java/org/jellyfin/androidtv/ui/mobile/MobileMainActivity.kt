@@ -1580,7 +1580,7 @@ private fun VesperMiniPlayer(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             MusicCircleButton(
-                label = "‹",
+                label = "⏮",
                 enabled = player.canPrevious,
                 compact = true,
             ) { onControl(MusicPlayerAction.PREVIOUS) }
@@ -1604,7 +1604,7 @@ private fun VesperMiniPlayer(
             }
 
             MusicCircleButton(
-                label = "›",
+                label = "⏭",
                 enabled = player.canNext,
                 compact = true,
             ) { onControl(MusicPlayerAction.NEXT) }
@@ -1757,12 +1757,6 @@ private fun VesperNowPlaying(
                         )
                     }
 
-                    if (player.volumeLevel != null) {
-                        BasicText(
-                            "${player.volumeLevel}%",
-                            style = TextStyle(color = Color(0xFFC8B9FF), fontSize = 12.sp, fontWeight = FontWeight.Bold),
-                        )
-                    }
                 }
 
                 Spacer(Modifier.height(largeGap))
@@ -1773,7 +1767,7 @@ private fun VesperNowPlaying(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     MusicCircleButton(
-                        label = "‹",
+                        label = "⏮",
                         enabled = player.canPrevious,
                     ) { onControl(MusicPlayerAction.PREVIOUS) }
 
@@ -1800,7 +1794,7 @@ private fun VesperNowPlaying(
                     Spacer(Modifier.width(22.dp))
 
                     MusicCircleButton(
-                        label = "›",
+                        label = "⏭",
                         enabled = player.canNext,
                     ) { onControl(MusicPlayerAction.NEXT) }
                 }
@@ -2382,7 +2376,7 @@ private fun MusicHero(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     MusicCircleButton(
-                        label = "‹",
+                        label = "⏮",
                         enabled = active.canPrevious,
                     ) { onControl(active, MusicPlayerAction.PREVIOUS) }
                     MusicCircleButton(
@@ -2390,7 +2384,7 @@ private fun MusicHero(
                         prominent = true,
                     ) { onControl(active, MusicPlayerAction.PLAY_PAUSE) }
                     MusicCircleButton(
-                        label = "›",
+                        label = "⏭",
                         enabled = active.canNext,
                     ) { onControl(active, MusicPlayerAction.NEXT) }
                     DarkButton(activeRoomLabel ?: active.name) { onOpenPlayer(active) }
@@ -2937,8 +2931,10 @@ private fun MusicCircleButton(
                 },
                 fontSize = when {
                     compact && label == "Ⅱ" -> 13.sp
+                    compact && label in setOf("⏮", "⏭") -> 14.sp
                     compact -> 17.sp
                     label == "Ⅱ" -> 15.sp
+                    label in setOf("⏮", "⏭") -> 16.sp
                     else -> 20.sp
                 },
                 fontWeight = FontWeight.Bold,
@@ -3079,7 +3075,7 @@ private fun MusicPlayerControlPopup(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 MusicCircleButton(
-                    label = "‹",
+                    label = "⏮",
                     enabled = player.canPrevious,
                 ) { onControl(MusicPlayerAction.PREVIOUS) }
                 Spacer(Modifier.width(14.dp))
@@ -3089,7 +3085,7 @@ private fun MusicPlayerControlPopup(
                 ) { onControl(MusicPlayerAction.PLAY_PAUSE) }
                 Spacer(Modifier.width(14.dp))
                 MusicCircleButton(
-                    label = "›",
+                    label = "⏭",
                     enabled = player.canNext,
                 ) { onControl(MusicPlayerAction.NEXT) }
             }
@@ -3828,7 +3824,9 @@ private fun HomeRecentMusicCard(
                 .border(1.dp, Color(0x333D4F73), RoundedCornerShape(18.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            if (!item.imageUrl.isNullOrBlank()) {
+            if (item.mediaType == "playlist") {
+                VesperPlaylistArtwork(item.name)
+            } else if (!item.imageUrl.isNullOrBlank()) {
                 AsyncImage(
                     modifier = Modifier.fillMaxSize(),
                     url = item.imageUrl,
@@ -3845,10 +3843,15 @@ private fun HomeRecentMusicCard(
         Spacer(Modifier.height(6.dp))
         BasicText(
             item.name,
-            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-            maxLines = 1,
+            style = TextStyle(
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 14.sp,
+            ),
+            maxLines = 2,
         )
-        if (item.subtitle.isNotBlank()) {
+        if (item.mediaType != "playlist" && item.subtitle.isNotBlank()) {
             BasicText(
                 item.subtitle,
                 style = TextStyle(color = Color(0xFF7F8793), fontSize = 9.sp),
