@@ -2137,13 +2137,29 @@ private fun MaPlayerRow(
     }
 }
 
+private fun musicPlayersCompatible(
+    primary: MaPlayer,
+    candidate: MaPlayer,
+): Boolean {
+    if (primary.playerId == candidate.playerId) return true
+    return candidate.playerId in primary.canGroupWith ||
+        primary.playerId in candidate.canGroupWith
+}
+
 @Composable
 private fun MusicRoomPicker(
     item: MaMediaItem,
     players: List<MaPlayer>,
     onDismiss: () -> Unit,
-    onPlay: (MaPlayer) -> Unit,
+    onPlay: (List<MaPlayer>) -> Unit,
 ) {
+    val groups = players.filter { it.type == "group" }
+    val rooms = players.filter { it.type != "group" }
+    var selectedIds by remember(item.uri) { mutableStateOf(setOf<String>()) }
+
+    val selectedRooms = rooms.filter { it.playerId in selectedIds }
+    val primary = selectedRooms.firstOrNull()
+
     Popup(
         alignment = Alignment.Center,
         onDismissRequest = onDismiss,
@@ -2151,7 +2167,7 @@ private fun MusicRoomPicker(
     ) {
         Column(
             modifier = Modifier
-                .width(340.dp)
+                .width(350.dp)
                 .clip(RoundedCornerShape(26.dp))
                 .background(Color(0xFA151722))
                 .border(1.dp, Color(0x665B47D8), RoundedCornerShape(26.dp))
@@ -2174,6 +2190,11 @@ private fun MusicRoomPicker(
                         style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold),
                         maxLines = 1,
                     )
+                    Spacer(Modifier.height(3.dp))
+                    BasicText(
+                        "Choose one room or build a temporary group.",
+                        style = TextStyle(color = Color(0xFF858E9B), fontSize = 10.sp),
+                    )
                 }
                 Box(
                     modifier = Modifier
@@ -2187,60 +2208,167 @@ private fun MusicRoomPicker(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            if (players.isEmpty()) {
-                BasicText(
-                    "No Music Assistant players are available.",
-                    style = TextStyle(color = Color(0xFFA7B1BD), fontSize = 13.sp),
-                    modifier = Modifier.padding(vertical = 12.dp),
-                )
-            } else {
-                players.take(10).forEach { player ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { onPlay(player) }
-                            .padding(horizontal = 12.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(13.dp))
-                                .background(Color(0x332F6BFF)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            BasicText(
-                                "♫",
-                                style = TextStyle(color = Color(0xFFA98CFF), fontSize = 18.sp, fontWeight = FontWeight.Bold),
-                            )
-                        }
-                        Spacer(Modifier.width(11.dp))
-                        Column(Modifier.weight(1f)) {
-                            BasicText(
-                                player.name,
-                                style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                            )
-                            BasicText(
-                                when {
-                                    player.playbackState == "playing" && !player.currentTitle.isNullOrBlank() ->
-                                        "Playing ${player.currentTitle}"
-                                    player.playbackState == "paused" -> "Paused"
-                                    else -> "Ready"
-                                },
-                                style = TextStyle(color = Color(0xFF818A98), fontSize = 10.sp),
-                                maxLines = 1,
-                            )
-                        }
+            LazyColumn(
+                modifier = Modifier.height(430.dp),
+            ) {
+                if (groups.isNotEmpty()) {
+                    item {
                         BasicText(
-                            "›",
-                            style = TextStyle(color = Color(0xFF8D91A0), fontSize = 24.sp),
+                            "READY-MADE GROUPS",
+                            style = TextStyle(
+                                color = Color(0xFF777D92),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.4.sp,
+                            ),
+                            modifier = Modifier.padding(start = 10.dp, top = 8.dp, bottom = 5.dp),
+                        )
+                    }
+
+                    items(groups, key = { "group-${it.playerId}" }) { group ->
+                        MusicDestinationRow(
+                            player = group,
+                            selected = false,
+                            enabled = true,
+                            trailing = "›",
+                            onClick = { onPlay(listOf(group)) },
+                        )
+                    }
+                }
+
+                if (rooms.isNotEmpty()) {
+                    item {
+                        BasicText(
+                            "ROOMS",
+                            style = TextStyle(
+                                color = Color(0xFF777D92),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.4.sp,
+                            ),
+                            modifier = Modifier.padding(start = 10.dp, top = 10.dp, bottom = 5.dp),
+                        )
+                    }
+
+                    items(rooms, key = { "room-${it.playerId}" }) { room ->
+                        val selected = room.playerId in selectedIds
+                        val compatible = primary == null ||
+                            selected ||
+                            musicPlayersCompatible(primary, room)
+
+                        MusicDestinationRow(
+                            player = room,
+                            selected = selected,
+                            enabled = compatible,
+                            trailing = if (selected) "✓" else "",
+                            onClick = {
+                                selectedIds = if (selected) {
+                                    selectedIds - room.playerId
+                                } else {
+                                    selectedIds + room.playerId
+                                }
+                            },
                         )
                     }
                 }
             }
+
+            if (selectedRooms.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                VesperButton(
+                    if (selectedRooms.size == 1) {
+                        "Play in ${selectedRooms.first().name}"
+                    } else {
+                        "Play on ${selectedRooms.size} rooms"
+                    }
+                ) {
+                    onPlay(selectedRooms)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicDestinationRow(
+    player: MaPlayer,
+    selected: Boolean,
+    enabled: Boolean,
+    trailing: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                when {
+                    selected -> Color(0x332F246C)
+                    !enabled -> Color(0x2210131A)
+                    else -> Color.Transparent
+                }
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(
+                    if (selected) Color(0x553D2D9B)
+                    else Color(0x332F6BFF)
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                if (player.type == "group") "◉" else "♫",
+                style = TextStyle(
+                    color = if (enabled) Color(0xFFA98CFF) else Color(0xFF555D69),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+        }
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                player.name,
+                style = TextStyle(
+                    color = if (enabled) Color.White else Color(0xFF666E7A),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                maxLines = 1,
+            )
+            BasicText(
+                when {
+                    !enabled -> "Can't join this combination"
+                    player.type == "group" -> "Ready-made group"
+                    player.playbackState == "playing" && !player.currentTitle.isNullOrBlank() ->
+                        "Playing ${player.currentTitle}"
+                    player.playbackState == "paused" -> "Paused"
+                    else -> "Ready"
+                },
+                style = TextStyle(
+                    color = if (enabled) Color(0xFF818A98) else Color(0xFF555D69),
+                    fontSize = 10.sp,
+                ),
+                maxLines = 1,
+            )
+        }
+        if (trailing.isNotBlank()) {
+            BasicText(
+                trailing,
+                style = TextStyle(
+                    color = if (selected) Color(0xFFC8B7FF) else Color(0xFF8D91A0),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
         }
     }
 }
