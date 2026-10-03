@@ -1703,7 +1703,7 @@ private fun MusicHub(
                         onControl(player, action)
                     },
                     onManageRooms = {
-                        manageGroupPlayerId = player.playerId
+                        manageGroupPlayerId = player.syncedTo ?: player.activeGroup ?: player.playerId
                     },
                 )
             }
@@ -2415,9 +2415,28 @@ private fun MusicCircleButton(
 @Composable
 private fun MusicPlayerControlPopup(
     player: MaPlayer,
+    allPlayers: List<MaPlayer>,
     onDismiss: () -> Unit,
     onControl: (MusicPlayerAction) -> Unit,
+    onManageRooms: () -> Unit,
 ) {
+    val memberIds = (player.groupMembers + player.playerId).distinct()
+    val memberNames = memberIds.mapNotNull { memberId ->
+        allPlayers.firstOrNull { it.playerId == memberId }?.name
+    }.distinct()
+    val roomSummary = when {
+        memberNames.size > 1 -> "${memberNames.size} rooms · ${memberNames.joinToString(", ")}"
+        memberNames.size == 1 -> "${memberNames.first()} only"
+        else -> player.name
+    }
+    val queueSummary = when {
+        player.currentMediaType == "radio" -> "Live radio"
+        player.queueItemCount <= 1 -> "Single item"
+        player.queueCurrentIndex != null ->
+            "Track ${player.queueCurrentIndex + 1} of ${player.queueItemCount}"
+        else -> "${player.queueItemCount} queued"
+    }
+
     Popup(
         alignment = Alignment.Center,
         onDismissRequest = onDismiss,
@@ -2504,9 +2523,9 @@ private fun MusicPlayerControlPopup(
                     Spacer(Modifier.height(5.dp))
                     BasicText(
                         when (player.playbackState) {
-                            "playing" -> "Playing"
-                            "paused" -> "Paused"
-                            else -> "Ready"
+                            "playing" -> "Playing · $queueSummary"
+                            "paused" -> "Paused · $queueSummary"
+                            else -> queueSummary
                         },
                         style = TextStyle(color = Color(0xFFA98CFF), fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
                     )
@@ -2520,14 +2539,20 @@ private fun MusicPlayerControlPopup(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MusicCircleButton("‹") { onControl(MusicPlayerAction.PREVIOUS) }
+                MusicCircleButton(
+                    label = "‹",
+                    enabled = player.canPrevious,
+                ) { onControl(MusicPlayerAction.PREVIOUS) }
                 Spacer(Modifier.width(14.dp))
                 MusicCircleButton(
-                    if (player.playbackState == "playing") "Ⅱ" else "▶",
+                    label = if (player.playbackState == "playing") "Ⅱ" else "▶",
                     prominent = true,
                 ) { onControl(MusicPlayerAction.PLAY_PAUSE) }
                 Spacer(Modifier.width(14.dp))
-                MusicCircleButton("›") { onControl(MusicPlayerAction.NEXT) }
+                MusicCircleButton(
+                    label = "›",
+                    enabled = player.canNext,
+                ) { onControl(MusicPlayerAction.NEXT) }
             }
 
             if (player.volumeLevel != null) {
@@ -2554,6 +2579,138 @@ private fun MusicPlayerControlPopup(
                     Spacer(Modifier.width(10.dp))
                     MusicCircleButton("+") { onControl(MusicPlayerAction.VOLUME_UP) }
                 }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color(0x66111620))
+                    .clickable(onClick = onManageRooms)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        "Rooms",
+                        style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    BasicText(
+                        roomSummary,
+                        style = TextStyle(color = Color(0xFF8C96A5), fontSize = 10.sp),
+                        maxLines = 1,
+                    )
+                }
+                BasicText(
+                    "›",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicGroupManager(
+    player: MaPlayer,
+    players: List<MaPlayer>,
+    onDismiss: () -> Unit,
+    onSave: (Set<String>) -> Unit,
+) {
+    val roomPlayers = players.filter { it.type != "group" }
+    val initialIds = (player.groupMembers + player.playerId).toSet()
+    var selectedIds by remember(player.playerId, player.groupMembers) {
+        mutableStateOf(initialIds)
+    }
+
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .width(350.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color(0xFA151722))
+                .border(1.dp, Color(0x665B47D8), RoundedCornerShape(28.dp))
+                .padding(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        "PLAYING IN",
+                        style = TextStyle(
+                            color = Color(0xFFA98CFF),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.8.sp,
+                        ),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    BasicText(
+                        if (selectedIds.size > 1) "${selectedIds.size} rooms" else player.name,
+                        style = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    BasicText(
+                        "Add or remove compatible rooms while playback continues.",
+                        style = TextStyle(color = Color(0xFF858E9B), fontSize = 10.sp),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0x22FFFFFF))
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText("×", style = TextStyle(color = Color.White, fontSize = 24.sp))
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            LazyColumn(modifier = Modifier.height(400.dp)) {
+                items(roomPlayers, key = { "manage-${it.playerId}" }) { room ->
+                    val selected = room.playerId in selectedIds
+                    val isLeader = room.playerId == player.playerId
+                    val compatible = isLeader ||
+                        selected ||
+                        musicPlayersCompatible(player, room)
+
+                    MusicDestinationRow(
+                        player = room,
+                        selected = selected,
+                        enabled = compatible && !isLeader,
+                        trailing = when {
+                            isLeader -> "●"
+                            selected -> "✓"
+                            else -> ""
+                        },
+                        onClick = {
+                            selectedIds = if (selected) {
+                                selectedIds - room.playerId
+                            } else {
+                                selectedIds + room.playerId
+                            }
+                        },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            VesperButton(
+                if (selectedIds.size > 1) {
+                    "Update ${selectedIds.size} rooms"
+                } else {
+                    "Play in ${player.name} only"
+                }
+            ) {
+                onSave(selectedIds)
             }
         }
     }
