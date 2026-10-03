@@ -182,6 +182,7 @@ class MobileMainActivity : FragmentActivity() {
                 onTabSelected = ::loadLibraryTab,
                 onRetryMusic = ::loadMusic,
                 onPlayMusic = ::playMusic,
+                onControlMusic = ::controlMusic,
                 onSettings = ::openSettings,
             )
         }
@@ -771,6 +772,41 @@ class MobileMainActivity : FragmentActivity() {
         }
     }
 
+    private fun controlMusic(player: MaPlayer, action: MusicPlayerAction) {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val client = MusicAssistantClient(
+                        baseUrl = musicAssistantBaseUrl,
+                        token = musicAssistantToken,
+                    )
+                    when (action) {
+                        MusicPlayerAction.PREVIOUS -> client.previous(player.playerId)
+                        MusicPlayerAction.PLAY_PAUSE -> client.playPause(player.playerId)
+                        MusicPlayerAction.NEXT -> client.next(player.playerId)
+                        MusicPlayerAction.VOLUME_DOWN -> player.volumeLevel?.let {
+                            client.setVolume(player.playerId, it - 5)
+                        }
+                        MusicPlayerAction.VOLUME_UP -> player.volumeLevel?.let {
+                            client.setVolume(player.playerId, it + 5)
+                        }
+                    }
+                }
+            }.onSuccess {
+                delay(350)
+                loadMusic()
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    error.message ?: "Couldn't control playback.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
     private fun openSettings() {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
@@ -942,6 +978,14 @@ class MobileMainActivity : FragmentActivity() {
                 .putExtra(MobilePlayerActivity.EXTRA_ITEM_ID, item.id.toString())
         )
     }
+}
+
+private enum class MusicPlayerAction {
+    PREVIOUS,
+    PLAY_PAUSE,
+    NEXT,
+    VOLUME_DOWN,
+    VOLUME_UP,
 }
 
 private data class MusicUiState(
@@ -1226,6 +1270,7 @@ private fun VesperMobile(
     onTabSelected: (MobileTab) -> Unit,
     onRetryMusic: () -> Unit,
     onPlayMusic: (MaMediaItem, MaPlayer) -> Unit,
+    onControlMusic: (MaPlayer, MusicPlayerAction) -> Unit,
     onSettings: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
@@ -1301,6 +1346,7 @@ private fun VesperMobile(
                     userName = userName,
                     onRetry = onRetryMusic,
                     onPlay = onPlayMusic,
+                    onControl = onControlMusic,
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
                 )
@@ -1475,10 +1521,12 @@ private fun MusicHub(
     userName: String,
     onRetry: () -> Unit,
     onPlay: (MaMediaItem, MaPlayer) -> Unit,
+    onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
     var pendingItem by remember { mutableStateOf<MaMediaItem?>(null) }
+    var selectedPlayer by remember { mutableStateOf<MaPlayer?>(null) }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -1520,6 +1568,8 @@ private fun MusicHub(
                             onPlay = { item ->
                                 if (item.playable) pendingItem = item
                             },
+                            onControl = onControl,
+                            onOpenPlayer = { selectedPlayer = it },
                         )
                     }
 
@@ -1575,7 +1625,10 @@ private fun MusicHub(
                     }
 
                     if (snapshot.players.isNotEmpty()) item {
-                        MaPlayerRow(snapshot.players)
+                        MaPlayerRow(
+                            players = snapshot.players,
+                            onClick = { selectedPlayer = it },
+                        )
                     }
                 }
             }
@@ -1589,6 +1642,16 @@ private fun MusicHub(
                 onPlay = { player ->
                     pendingItem = null
                     onPlay(item, player)
+                },
+            )
+        }
+
+        selectedPlayer?.let { player ->
+            MusicPlayerControlPopup(
+                player = player,
+                onDismiss = { selectedPlayer = null },
+                onControl = { action ->
+                    onControl(player, action)
                 },
             )
         }
@@ -1703,9 +1766,11 @@ private fun MusicErrorPanel(
 private fun MusicHero(
     snapshot: MusicAssistantSnapshot,
     onPlay: (MaMediaItem) -> Unit,
+    onControl: (MaPlayer, MusicPlayerAction) -> Unit,
+    onOpenPlayer: (MaPlayer) -> Unit,
 ) {
     val active = snapshot.players.firstOrNull {
-        it.playbackState == "playing" && !it.currentTitle.isNullOrBlank()
+        it.playbackState in setOf("playing", "paused") && !it.currentTitle.isNullOrBlank()
     }
     val recent = snapshot.recentlyPlayed.firstOrNull()
 
@@ -1814,7 +1879,21 @@ private fun MusicHero(
                     maxLines = 2,
                 )
             }
-            if (active == null && recent != null && recent.playable) {
+            if (active != null) {
+                Spacer(Modifier.height(13.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MusicCircleButton("‹") { onControl(active, MusicPlayerAction.PREVIOUS) }
+                    MusicCircleButton(
+                        if (active.playbackState == "playing") "Ⅱ" else "▶",
+                        prominent = true,
+                    ) { onControl(active, MusicPlayerAction.PLAY_PAUSE) }
+                    MusicCircleButton("›") { onControl(active, MusicPlayerAction.NEXT) }
+                    DarkButton(active.name) { onOpenPlayer(active) }
+                }
+            } else if (recent != null && recent.playable) {
                 Spacer(Modifier.height(13.dp))
                 VesperButton("Play somewhere", { onPlay(recent) })
             }
@@ -1902,6 +1981,7 @@ private fun MaMediaRow(
 @Composable
 private fun MaPlayerRow(
     players: List<MaPlayer>,
+    onClick: (MaPlayer) -> Unit,
 ) {
     Column(Modifier.padding(top = 10.dp)) {
         BasicText(
@@ -1923,10 +2003,11 @@ private fun MaPlayerRow(
                         .background(Color(0xD5151B25))
                         .border(
                             1.dp,
-                            if (player.playbackState == "playing") Color(0x665B47D8)
+                            if (player.playbackState in setOf("playing", "paused")) Color(0x665B47D8)
                             else Color(0x223D4F73),
                             RoundedCornerShape(18.dp),
                         )
+                        .clickable { onClick(player) }
                         .padding(13.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -2073,6 +2154,187 @@ private fun MusicRoomPicker(
                             style = TextStyle(color = Color(0xFF8D91A0), fontSize = 24.sp),
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicCircleButton(
+    label: String,
+    prominent: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(19.dp))
+            .background(
+                if (prominent) Color(0xFFEAF4FB)
+                else Color(0x44131520)
+            )
+            .border(
+                1.dp,
+                if (prominent) Color(0x33FFFFFF)
+                else Color(0x334D4A75),
+                RoundedCornerShape(19.dp),
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(
+                color = if (prominent) Color(0xFF101820) else Color.White,
+                fontSize = if (label == "Ⅱ") 15.sp else 20.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun MusicPlayerControlPopup(
+    player: MaPlayer,
+    onDismiss: () -> Unit,
+    onControl: (MusicPlayerAction) -> Unit,
+) {
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .width(350.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color(0xFA151722))
+                .border(1.dp, Color(0x665B47D8), RoundedCornerShape(28.dp))
+                .padding(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        "ROOM PLAYBACK",
+                        style = TextStyle(
+                            color = Color(0xFFA98CFF),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.8.sp,
+                        ),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    BasicText(
+                        player.name,
+                        style = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 1,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0x22FFFFFF))
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText("×", style = TextStyle(color = Color.White, fontSize = 24.sp))
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(82.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF111B2C)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!player.currentImageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            modifier = Modifier.fillMaxSize(),
+                            url = player.currentImageUrl,
+                            scaleType = ImageView.ScaleType.CENTER_CROP,
+                        )
+                    } else {
+                        BasicText(
+                            "♫",
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 34.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(14.dp))
+
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        player.currentTitle ?: "Nothing playing",
+                        style = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 2,
+                    )
+                    if (!player.currentArtist.isNullOrBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        BasicText(
+                            player.currentArtist,
+                            style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp),
+                            maxLines = 1,
+                        )
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    BasicText(
+                        when (player.playbackState) {
+                            "playing" -> "Playing"
+                            "paused" -> "Paused"
+                            else -> "Ready"
+                        },
+                        style = TextStyle(color = Color(0xFFA98CFF), fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MusicCircleButton("‹") { onControl(MusicPlayerAction.PREVIOUS) }
+                Spacer(Modifier.width(14.dp))
+                MusicCircleButton(
+                    if (player.playbackState == "playing") "Ⅱ" else "▶",
+                    prominent = true,
+                ) { onControl(MusicPlayerAction.PLAY_PAUSE) }
+                Spacer(Modifier.width(14.dp))
+                MusicCircleButton("›") { onControl(MusicPlayerAction.NEXT) }
+            }
+
+            if (player.volumeLevel != null) {
+                Spacer(Modifier.height(18.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0x66111620))
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicText(
+                        "Volume",
+                        style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                        modifier = Modifier.weight(1f),
+                    )
+                    MusicCircleButton("−") { onControl(MusicPlayerAction.VOLUME_DOWN) }
+                    Spacer(Modifier.width(10.dp))
+                    BasicText(
+                        "${player.volumeLevel}%",
+                        style = TextStyle(color = Color(0xFFD0C8FF), fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    MusicCircleButton("+") { onControl(MusicPlayerAction.VOLUME_UP) }
                 }
             }
         }
