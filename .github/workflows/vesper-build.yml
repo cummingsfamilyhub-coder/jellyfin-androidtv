@@ -37,6 +37,12 @@ jobs:
           curl -fL --retry 3 "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Paramount%2B_logo.svg/960px-Paramount%2B_logo.svg.png" -o app/src/main/res/drawable-nodpi/service_paramount_plus.png
           curl -fL --retry 3 "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Max_2025_logo.svg/960px-Max_2025_logo.svg.png" -o app/src/main/res/drawable-nodpi/service_max.png
 
+      - name: Restore stable Vesper debug signing key
+        run: |
+          mkdir -p ~/.android
+          base64 --decode .github/vesper-debug.keystore.b64 > ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+
       - name: Build debug APK
         run: |
           chmod +x ./gradlew
