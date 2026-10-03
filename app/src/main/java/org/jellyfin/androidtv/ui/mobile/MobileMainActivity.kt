@@ -123,6 +123,7 @@ class MobileMainActivity : FragmentActivity() {
     private var musicAssistantBaseUrl by mutableStateOf("")
     private var musicAssistantToken by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
+    private var showPersistentMiniPlayer by mutableStateOf(true)
     private val hydratedTabs = mutableSetOf<MobileTab>()
     private val loadingTabs = mutableSetOf<MobileTab>()
 
@@ -148,6 +149,8 @@ class MobileMainActivity : FragmentActivity() {
         musicAssistantToken = vesperPreferences
             .getString("music_assistant_token", "")
             .orEmpty()
+        showPersistentMiniPlayer = vesperPreferences
+            .getBoolean("show_persistent_mini_player", true)
         if (vesperPreferences.contains("seerr_url")) {
             vesperPreferences.edit().remove("seerr_url").apply()
         }
@@ -165,6 +168,7 @@ class MobileMainActivity : FragmentActivity() {
                 popularityScope = popularityScope,
                 musicState = musicState,
                 musicConfigured = musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank(),
+                showPersistentMiniPlayer = showPersistentMiniPlayer,
                 tmdbConfigured = tmdbApiKey.isNotBlank(),
                 selected = selected,
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
@@ -870,6 +874,21 @@ class MobileMainActivity : FragmentActivity() {
             setPadding(dp(22), dp(8), dp(22), 0)
         }
 
+        val miniPlayerSwitch = android.widget.Switch(this).apply {
+            text = "Show persistent mini-player"
+            textSize = 15f
+            isChecked = showPersistentMiniPlayer
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        container.addView(miniPlayerSwitch)
+
+        container.addView(TextView(this).apply {
+            text = "Keeps music controls above the navigation dock while audio is active."
+            textSize = 12f
+            alpha = 0.72f
+            setPadding(0, 0, 0, dp(14))
+        })
+
         container.addView(TextView(this).apply {
             text = "Popularity source"
             textSize = 15f
@@ -997,6 +1016,7 @@ class MobileMainActivity : FragmentActivity() {
                 seerrApiKey = seerrKeyInput.text?.toString()?.trim().orEmpty()
                 musicAssistantBaseUrl = musicUrlInput.text?.toString()?.trim()?.trimEnd('/').orEmpty()
                 musicAssistantToken = musicTokenInput.text?.toString()?.trim().orEmpty()
+                showPersistentMiniPlayer = miniPlayerSwitch.isChecked
                 popularityScope = if (localRadio.isChecked) {
                     PopularityScope.LOCAL
                 } else {
@@ -1011,6 +1031,7 @@ class MobileMainActivity : FragmentActivity() {
                     .putString("music_assistant_url", musicAssistantBaseUrl)
                     .putString("music_assistant_token", musicAssistantToken)
                     .putString("popularity_scope", popularityScope.name)
+                    .putBoolean("show_persistent_mini_player", showPersistentMiniPlayer)
                     .apply()
 
                 loadPopularity()
@@ -1307,6 +1328,7 @@ private fun VesperMobile(
     popularityScope: PopularityScope,
     musicState: MusicUiState,
     musicConfigured: Boolean,
+    showPersistentMiniPlayer: Boolean,
     tmdbConfigured: Boolean,
     selected: BaseItemDto?,
     userName: String,
@@ -1380,11 +1402,7 @@ private fun VesperMobile(
             when (tab) {
                 MobileTab.HOME -> MobileHome(
                     state = state,
-                    popularity = popularity,
-                    popularityScope = popularityScope,
                     musicState = musicState,
-                    musicConfigured = musicConfigured,
-                    onOpenMusic = { openTab(MobileTab.MUSIC) },
                     userName = userName,
                     api = api,
                     onSelect = onSelect,
@@ -1393,6 +1411,7 @@ private fun VesperMobile(
                     onToggleFavorite = onToggleFavorite,
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
+                    onOpenTab = openTab,
                     expanded = expanded,
                 )
                 MobileTab.VIDEO -> VideoHub(
@@ -1471,7 +1490,7 @@ private fun VesperMobile(
                 )
             }
 
-            persistentMusicPlayer?.let { player ->
+            if (showPersistentMiniPlayer) persistentMusicPlayer?.let { player ->
                 VesperMiniPlayer(
                     player = player,
                     onOpen = { showNowPlaying = true },
@@ -3950,11 +3969,7 @@ private fun BookModeStrip() {
 @Composable
 private fun MobileHome(
     state: MobileHomeState,
-    popularity: PopularityState,
-    popularityScope: PopularityScope,
     musicState: MusicUiState,
-    musicConfigured: Boolean,
-    onOpenMusic: () -> Unit,
     userName: String,
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
@@ -3963,6 +3978,7 @@ private fun MobileHome(
     onToggleFavorite: (BaseItemDto) -> Unit,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
+    onOpenTab: (MobileTab) -> Unit,
     expanded: Boolean,
 ) {
     LazyColumn(
@@ -4000,7 +4016,6 @@ private fun MobileHome(
             }
         } else {
             val hero = state.continueWatching.firstOrNull()
-            val homeMyV = sortByPopularity(state.myV, popularity, popularityScope)
 
             if (hero != null) {
                 item {
@@ -4011,37 +4026,303 @@ private fun MobileHome(
                         onPlay = onPlay,
                         onInfo = { onSelect(hero) },
                         onToggleFavorite = { onToggleFavorite(hero) },
+                        eyebrow = "UP NEXT",
                     )
                 }
             }
 
-            if (state.continueWatching.isNotEmpty()) item {
-                MediaRow("Continue Watching", state.continueWatching, api, onSelect, onToggleFavorite, landscape = true)
+            val continueVideo = if (hero != null) state.continueWatching.drop(1) else state.continueWatching
+            val continueMusic = musicState.snapshot.recentlyPlayed
+
+            if (continueVideo.isNotEmpty() || continueMusic.isNotEmpty()) {
+                item {
+                    HomeContinueRow(
+                        video = continueVideo.take(6),
+                        music = continueMusic.take(6),
+                        api = api,
+                        onVideo = onSelect,
+                        onMusic = { onOpenTab(MobileTab.MUSIC) },
+                    )
+                }
             }
 
             item {
-                HomeMusicRow(
-                    state = musicState,
-                    configured = musicConfigured,
-                    onOpenMusic = onOpenMusic,
+                HomeQuickAccess(
+                    onMyV = { onOpenTab(MobileTab.MYV) },
+                    onRequest = { onOpenTab(MobileTab.SEARCH) },
+                    onRooms = { onOpenTab(MobileTab.MUSIC) },
+                    onSettings = onSettings,
                 )
-            }
-
-            item {
-                PlaceholderTileRow(
-                    title = "Continue Reading",
-                    items = listOf(
-                        "Books" to "Reading progress will live here",
-                        "Audiobooks" to "Resume listening across devices",
-                        "Reader" to "Kindle-style reading is planned",
-                    ),
-                )
-            }
-
-            if (homeMyV.isNotEmpty()) item {
-                MediaRow("MyV / Favourites", homeMyV, api, onSelect, onToggleFavorite)
             }
         }
+    }
+}
+
+private data class HomeContinueEntry(
+    val video: BaseItemDto? = null,
+    val music: MaMediaItem? = null,
+)
+
+@Composable
+private fun HomeContinueRow(
+    video: List<BaseItemDto>,
+    music: List<MaMediaItem>,
+    api: ApiClient,
+    onVideo: (BaseItemDto) -> Unit,
+    onMusic: (MaMediaItem) -> Unit,
+) {
+    val entries = buildList {
+        val count = maxOf(video.size, music.size)
+        repeat(count) { index ->
+            video.getOrNull(index)?.let { add(HomeContinueEntry(video = it)) }
+            music.getOrNull(index)?.let { add(HomeContinueEntry(music = it)) }
+        }
+    }
+
+    Column(Modifier.padding(top = 8.dp)) {
+        BasicText(
+            "Continue",
+            style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+        )
+
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(
+                items = entries,
+                key = { entry ->
+                    entry.video?.let { "video-${it.id}" }
+                        ?: entry.music?.let { "music-${it.uri}" }
+                        ?: "continue"
+                },
+            ) { entry ->
+                when {
+                    entry.video != null -> HomeContinueVideoCard(
+                        item = entry.video,
+                        api = api,
+                        onClick = { onVideo(entry.video) },
+                    )
+                    entry.music != null -> HomeContinueMusicCard(
+                        item = entry.music,
+                        onClick = { onMusic(entry.music) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeContinueVideoCard(
+    item: BaseItemDto,
+    api: ApiClient,
+    onClick: () -> Unit,
+) {
+    val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages[ImageType.PRIMARY]
+
+    Row(
+        modifier = Modifier
+            .width(224.dp)
+            .height(92.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xD5151B25))
+            .border(1.dp, Color(0x283D4F73), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(74.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF111A23)),
+        ) {
+            AsyncImage(
+                modifier = Modifier.fillMaxSize(),
+                url = image?.getUrl(api),
+                blurHash = image?.blurHash,
+                scaleType = ImageView.ScaleType.CENTER_CROP,
+            )
+
+            val runtime = item.runTimeTicks ?: 0L
+            val position = item.userData?.playbackPositionTicks ?: 0L
+            if (runtime > 0L && position > 0L) {
+                val progress = (position.toFloat() / runtime.toFloat()).coerceIn(0f, 1f)
+                Box(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(Color(0x66000000))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress)
+                            .height(3.dp)
+                            .background(Color(0xFF825CFF))
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                "VIDEO",
+                style = TextStyle(
+                    color = Color(0xFF8E80C9),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.1.sp,
+                ),
+            )
+            Spacer(Modifier.height(3.dp))
+            BasicText(
+                item.name ?: "Untitled",
+                style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                maxLines = 2,
+            )
+            val secondary = when (item.type) {
+                BaseItemKind.EPISODE -> listOfNotNull(
+                    item.seriesName,
+                    item.parentIndexNumber?.let { "S$it" },
+                    item.indexNumber?.let { "E$it" },
+                ).joinToString(" • ")
+                else -> item.productionYear?.toString().orEmpty()
+            }
+            if (secondary.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                BasicText(
+                    secondary,
+                    style = TextStyle(color = Color(0xFF818A98), fontSize = 9.sp),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeContinueMusicCard(
+    item: MaMediaItem,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .width(224.dp)
+            .height(92.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xD5151B25))
+            .border(1.dp, Color(0x283D4F73), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(74.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF111A23)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (item.mediaType == "playlist") {
+                VesperPlaylistArtwork(item.name)
+            } else if (!item.imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = item.imageUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    "♫",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 28.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                "MUSIC",
+                style = TextStyle(
+                    color = Color(0xFF8E80C9),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.1.sp,
+                ),
+            )
+            Spacer(Modifier.height(3.dp))
+            BasicText(
+                item.name,
+                style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                maxLines = 2,
+            )
+            if (item.subtitle.isNotBlank() && item.mediaType != "playlist") {
+                Spacer(Modifier.height(2.dp))
+                BasicText(
+                    item.subtitle,
+                    style = TextStyle(color = Color(0xFF818A98), fontSize = 9.sp),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeQuickAccess(
+    onMyV: () -> Unit,
+    onRequest: () -> Unit,
+    onRooms: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    Column(Modifier.padding(top = 14.dp, bottom = 12.dp)) {
+        BasicText(
+            "Quick Access",
+            style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+        )
+
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            item { HomeQuickAccessChip("♥", "MyV", onMyV) }
+            item { HomeQuickAccessChip("⌕", "Request", onRequest) }
+            item { HomeQuickAccessChip("♫", "Rooms", onRooms) }
+            item { HomeQuickAccessChip("⚙", "Settings", onSettings) }
+        }
+    }
+}
+
+@Composable
+private fun HomeQuickAccessChip(
+    icon: String,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .height(52.dp)
+            .clip(RoundedCornerShape(17.dp))
+            .background(Color(0xD5151B25))
+            .border(1.dp, Color(0x283D4F73), RoundedCornerShape(17.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicText(
+            icon,
+            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 16.sp, fontWeight = FontWeight.Bold),
+        )
+        Spacer(Modifier.width(8.dp))
+        BasicText(
+            label,
+            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+        )
     }
 }
 
@@ -4165,6 +4446,7 @@ private fun VesperHero(
     onPlay: (BaseItemDto) -> Unit,
     onInfo: () -> Unit,
     onToggleFavorite: () -> Unit,
+    eyebrow: String? = null,
 ) {
     val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages[ImageType.PRIMARY]
     val heroHeight = if (expanded) 330.dp else 245.dp
@@ -4221,7 +4503,7 @@ private fun VesperHero(
                 .padding(start = 20.dp, end = 12.dp, bottom = 18.dp),
         ) {
             BasicText(
-                if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "CONTINUE WATCHING" else "FEATURED",
+                eyebrow ?: if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "CONTINUE WATCHING" else "FEATURED",
                 style = TextStyle(
                     color = Color(0xFFA98CFF),
                     fontSize = 9.sp,
