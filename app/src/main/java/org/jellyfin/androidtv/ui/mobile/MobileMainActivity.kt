@@ -183,6 +183,7 @@ class MobileMainActivity : FragmentActivity() {
                 onRetryMusic = ::loadMusic,
                 onPlayMusic = ::playMusic,
                 onControlMusic = ::controlMusic,
+                onUpdateMusicGroup = ::updateMusicGroup,
                 onSettings = ::openSettings,
             )
         }
@@ -743,8 +744,8 @@ class MobileMainActivity : FragmentActivity() {
         }
     }
 
-    private fun playMusic(item: MaMediaItem, player: MaPlayer) {
-        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+    private fun playMusic(item: MaMediaItem, players: List<MaPlayer>) {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank() || players.isEmpty()) return
 
         lifecycleScope.launch {
             runCatching {
@@ -752,12 +753,17 @@ class MobileMainActivity : FragmentActivity() {
                     MusicAssistantClient(
                         baseUrl = musicAssistantBaseUrl,
                         token = musicAssistantToken,
-                    ).play(item, player.playerId)
+                    ).groupAndPlay(item, players.map { it.playerId })
                 }
             }.onSuccess {
+                val destination = if (players.size == 1) {
+                    players.first().name
+                } else {
+                    "${players.size} rooms"
+                }
                 Toast.makeText(
                     this@MobileMainActivity,
-                    "Playing ${item.name} in ${player.name}",
+                    "Playing ${item.name} in $destination",
                     Toast.LENGTH_SHORT,
                 ).show()
                 delay(700)
@@ -801,6 +807,43 @@ class MobileMainActivity : FragmentActivity() {
                 Toast.makeText(
                     this@MobileMainActivity,
                     error.message ?: "Couldn't control playback.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private fun updateMusicGroup(
+        player: MaPlayer,
+        selectedPlayerIds: Set<String>,
+    ) {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+
+        val currentMembers = (player.groupMembers + player.playerId).toSet()
+        val desiredMembers = selectedPlayerIds + player.playerId
+        val toAdd = (desiredMembers - currentMembers).toList()
+        val toRemove = (currentMembers - desiredMembers)
+            .filterNot { it == player.playerId }
+
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    MusicAssistantClient(
+                        baseUrl = musicAssistantBaseUrl,
+                        token = musicAssistantToken,
+                    ).updateGroup(
+                        targetPlayerId = player.playerId,
+                        addPlayerIds = toAdd,
+                        removePlayerIds = toRemove,
+                    )
+                }
+            }.onSuccess {
+                delay(500)
+                loadMusic()
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    error.message ?: "Couldn't update the room group.",
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -1269,8 +1312,9 @@ private fun VesperMobile(
     onSwitchProfile: () -> Unit,
     onTabSelected: (MobileTab) -> Unit,
     onRetryMusic: () -> Unit,
-    onPlayMusic: (MaMediaItem, MaPlayer) -> Unit,
+    onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControlMusic: (MaPlayer, MusicPlayerAction) -> Unit,
+    onUpdateMusicGroup: (MaPlayer, Set<String>) -> Unit,
     onSettings: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
@@ -1347,6 +1391,7 @@ private fun VesperMobile(
                     onRetry = onRetryMusic,
                     onPlay = onPlayMusic,
                     onControl = onControlMusic,
+                    onUpdateGroup = onUpdateMusicGroup,
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
                 )
@@ -1520,8 +1565,9 @@ private fun MusicHub(
     configured: Boolean,
     userName: String,
     onRetry: () -> Unit,
-    onPlay: (MaMediaItem, MaPlayer) -> Unit,
+    onPlay: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
+    onUpdateGroup: (MaPlayer, Set<String>) -> Unit,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
