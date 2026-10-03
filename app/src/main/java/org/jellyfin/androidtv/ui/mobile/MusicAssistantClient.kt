@@ -34,6 +34,16 @@ internal data class MaPlayer(
     val currentTitle: String?,
     val currentArtist: String?,
     val currentImageUrl: String?,
+    val currentMediaType: String?,
+    val activeSource: String?,
+    val activeGroup: String?,
+    val syncedTo: String?,
+    val groupMembers: List<String>,
+    val canGroupWith: Set<String>,
+    val queueItemCount: Int,
+    val queueCurrentIndex: Int?,
+    val canPrevious: Boolean,
+    val canNext: Boolean,
 )
 
 internal data class MusicAssistantSnapshot(
@@ -92,8 +102,16 @@ internal class MusicAssistantClient(
                 .put("order_by", "name")
         ).mapNotNull(::parseMediaItem)
 
+        val queues = commandArray("player_queues/all", JSONObject())
+            .associateBy { it.optString("queue_id") }
+
         val players = commandArray("players/all", JSONObject())
-            .mapNotNull(::parsePlayer)
+            .mapNotNull { playerJson ->
+                val playerId = playerJson.optString("player_id")
+                val activeSource = playerJson.optString("active_source").takeIf { it.isNotBlank() }
+                val queue = activeSource?.let(queues::get) ?: queues[playerId]
+                parsePlayer(playerJson, queue)
+            }
             .filter { it.available && it.enabled && !it.hidden && !it.privatePlayer }
             .filter { it.type !in setOf("protocol", "source", "visualizer", "light") }
             .sortedWith(
@@ -119,6 +137,50 @@ internal class MusicAssistantClient(
                 .put("media", item.uri)
                 .put("option", "replace")
                 .put("start_from_beginning", false)
+        )
+    }
+
+
+    fun groupAndPlay(item: MaMediaItem, playerIds: List<String>) {
+        val selected = playerIds.distinct()
+        require(selected.isNotEmpty()) { "Choose at least one room." }
+
+        if (selected.size == 1) {
+            play(item, selected.first())
+            return
+        }
+
+        val target = selected.first()
+        val children = selected.drop(1)
+
+        // Clear stale dynamic membership before creating the new room combination.
+        command(
+            "players/cmd/ungroup_many",
+            JSONObject().put("player_ids", JSONArray(selected))
+        )
+        command(
+            "players/cmd/set_members",
+            JSONObject()
+                .put("target_player", target)
+                .put("player_ids_to_add", JSONArray(children))
+                .put("player_ids_to_remove", JSONArray())
+        )
+        play(item, target)
+    }
+
+    fun updateGroup(
+        targetPlayerId: String,
+        addPlayerIds: List<String>,
+        removePlayerIds: List<String>,
+    ) {
+        if (addPlayerIds.isEmpty() && removePlayerIds.isEmpty()) return
+
+        command(
+            "players/cmd/set_members",
+            JSONObject()
+                .put("target_player", targetPlayerId)
+                .put("player_ids_to_add", JSONArray(addPlayerIds.distinct()))
+                .put("player_ids_to_remove", JSONArray(removePlayerIds.distinct()))
         )
     }
 
@@ -246,12 +308,24 @@ internal class MusicAssistantClient(
         )
     }
 
-    private fun parsePlayer(json: JSONObject): MaPlayer? {
+    private fun parsePlayer(
+        json: JSONObject,
+        queue: JSONObject?,
+    ): MaPlayer? {
         val id = json.optString("player_id").trim()
         val name = json.optString("name").trim()
         if (id.isBlank() || name.isBlank()) return null
 
         val current = json.optJSONObject("current_media")
+        val mediaType = current?.optString("media_type")?.takeIf { it.isNotBlank() }
+        val queueItems = queue?.optInt("items", 0) ?: 0
+        val queueIndex = queue?.let {
+            if (it.isNull("current_index")) null else it.optInt("current_index")
+        }
+        val isLive = mediaType in setOf("radio", "audio_source")
+        val hasPrevious = !isLive && queueIndex != null && queueIndex > 0
+        val hasNext = !isLive && queue?.optJSONObject("next_item") != null
+
         return MaPlayer(
             playerId = id,
             name = name,
@@ -268,7 +342,29 @@ internal class MusicAssistantClient(
             currentImageUrl = current?.optString("image_url")
                 ?.takeIf { it.isNotBlank() }
                 ?.let(::normalizeImageUrl),
+            currentMediaType = mediaType,
+            activeSource = json.optString("active_source").takeIf { it.isNotBlank() },
+            activeGroup = json.optString("active_group").takeIf { it.isNotBlank() },
+            syncedTo = json.optString("synced_to").takeIf { it.isNotBlank() },
+            groupMembers = json.stringList("group_members"),
+            canGroupWith = json.stringList("can_group_with").toSet(),
+            queueItemCount = queueItems,
+            queueCurrentIndex = queueIndex,
+            canPrevious = hasPrevious,
+            canNext = hasNext,
         )
+    }
+
+    private fun JSONObject.stringList(key: String): List<String> {
+        val values = optJSONArray(key) ?: return emptyList()
+        return buildList {
+            for (index in 0 until values.length()) {
+                values.optString(index)
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+                    ?.let(::add)
+            }
+        }
     }
 
     private fun artistNames(json: JSONObject): String {
