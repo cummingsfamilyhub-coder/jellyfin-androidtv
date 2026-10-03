@@ -143,6 +143,10 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name=".ui.mobile.MobileSettingsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".ui.mobile.MobilePlayerActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustNothing" />
