@@ -3,17 +3,9 @@ package org.jellyfin.androidtv.ui.mobile
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.widget.EditText
-import android.text.InputType
-import android.app.AlertDialog
 import android.os.Bundle
 import android.widget.ImageView
-import android.widget.TextView
 import android.widget.Toast
-import android.widget.RadioGroup
-import android.widget.RadioButton
-import android.widget.ScrollView
-import android.widget.LinearLayout
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -44,7 +36,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import org.jellyfin.androidtv.ui.preference.PreferencesActivity
 import org.jellyfin.androidtv.data.repository.ItemMutationRepository
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.Popup
@@ -116,6 +107,14 @@ class MobileMainActivity : FragmentActivity() {
     private val itemMutationRepository by inject<ItemMutationRepository>()
 
     private val profileSwitchLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            recreate()
+        }
+    }
+
+    private val settingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         if (result.resultCode == RESULT_OK) {
@@ -874,185 +873,7 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun openSettings() {
-        val density = resources.displayMetrics.density
-        fun dp(value: Int) = (value * density).toInt()
-
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(8), dp(22), 0)
-        }
-
-        val miniPlayerSwitch = android.widget.Switch(this).apply {
-            text = "Show persistent mini-player"
-            textSize = 15f
-            isChecked = showPersistentMiniPlayer
-            setPadding(0, dp(8), 0, dp(4))
-        }
-        container.addView(miniPlayerSwitch)
-
-        container.addView(TextView(this).apply {
-            text = "Keeps music controls above the navigation dock while audio is active."
-            textSize = 12f
-            alpha = 0.72f
-            setPadding(0, 0, 0, dp(14))
-        })
-
-        container.addView(TextView(this).apply {
-            text = "Popularity source"
-            textSize = 15f
-            setPadding(0, dp(8), 0, dp(4))
-        })
-
-        val popularityGroup = RadioGroup(this).apply {
-            orientation = RadioGroup.HORIZONTAL
-        }
-        val globalRadio = RadioButton(this).apply {
-            text = "Global"
-            isChecked = popularityScope == PopularityScope.GLOBAL
-        }
-        val localRadio = RadioButton(this).apply {
-            text = "Local"
-            isChecked = popularityScope == PopularityScope.LOCAL
-        }
-        popularityGroup.addView(globalRadio)
-        popularityGroup.addView(localRadio)
-        container.addView(popularityGroup)
-
-        container.addView(TextView(this).apply {
-            text = "Global uses TMDb weekly popularity. Local uses Vesper/Jellyfin viewing activity."
-            textSize = 12f
-            alpha = 0.72f
-            setPadding(0, 0, 0, dp(14))
-        })
-
-        container.addView(TextView(this).apply {
-            text = "TMDb v3 API key"
-            textSize = 15f
-            setPadding(0, 0, 0, dp(4))
-        })
-
-        val input = EditText(this).apply {
-            setText(tmdbApiKey)
-            hint = "TMDb v3 API key"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSelectAllOnFocus(false)
-            setSingleLine(true)
-        }
-        container.addView(input)
-
-        container.addView(TextView(this).apply {
-            text = "Seerr service"
-            textSize = 15f
-            setPadding(0, dp(14), 0, dp(4))
-        })
-
-        container.addView(TextView(this).apply {
-            text = VesperServiceConfig.SEERR_BASE_URL
-            textSize = 13f
-            alpha = 0.72f
-            setPadding(0, 0, 0, dp(6))
-        })
-
-        container.addView(TextView(this).apply {
-            text = "Seerr API key"
-            textSize = 15f
-            setPadding(0, dp(12), 0, dp(4))
-        })
-
-        val seerrKeyInput = EditText(this).apply {
-            setText(seerrApiKey)
-            hint = "Seerr API key"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSelectAllOnFocus(false)
-            setSingleLine(true)
-        }
-        container.addView(seerrKeyInput)
-
-        container.addView(TextView(this).apply {
-            text = "Used for Search and one-tap media requests."
-            textSize = 12f
-            alpha = 0.72f
-            setPadding(0, 0, 0, dp(8))
-        })
-
-        container.addView(TextView(this).apply {
-            text = getString(R.string.vesper_music_assistant)
-            textSize = 15f
-            setPadding(0, dp(14), 0, dp(4))
-        })
-
-        val musicUrlInput = EditText(this).apply {
-            setText(musicAssistantBaseUrl)
-            hint = getString(R.string.vesper_music_assistant_url_hint)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setSelectAllOnFocus(false)
-            setSingleLine(true)
-        }
-        container.addView(musicUrlInput)
-
-        container.addView(TextView(this).apply {
-            text = getString(R.string.vesper_music_assistant_token_label)
-            textSize = 15f
-            setPadding(0, dp(12), 0, dp(4))
-        })
-
-        val musicTokenInput = EditText(this).apply {
-            setText(musicAssistantToken)
-            hint = getString(R.string.vesper_music_assistant_token_hint)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSelectAllOnFocus(false)
-            setSingleLine(true)
-        }
-        container.addView(musicTokenInput)
-
-        container.addView(TextView(this).apply {
-            text = getString(R.string.vesper_music_assistant_setup_help)
-            textSize = 12f
-            alpha = 0.72f
-            setPadding(0, 0, 0, dp(8))
-        })
-
-        val settingsScroll = ScrollView(this).apply {
-            addView(container)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Vesper settings")
-            .setView(settingsScroll)
-            .setPositiveButton("Save") { _, _ ->
-                tmdbApiKey = input.text?.toString()?.trim().orEmpty()
-                seerrApiKey = seerrKeyInput.text?.toString()?.trim().orEmpty()
-                musicAssistantBaseUrl = musicUrlInput.text?.toString()?.trim()?.trimEnd('/').orEmpty()
-                musicAssistantToken = musicTokenInput.text?.toString()?.trim().orEmpty()
-                showPersistentMiniPlayer = miniPlayerSwitch.isChecked
-                popularityScope = if (localRadio.isChecked) {
-                    PopularityScope.LOCAL
-                } else {
-                    PopularityScope.GLOBAL
-                }
-
-                getSharedPreferences("vesper", MODE_PRIVATE)
-                    .edit()
-                    .putString("tmdb_api_key", tmdbApiKey)
-                    .remove("seerr_url")
-                    .putString("seerr_api_key", seerrApiKey)
-                    .putString("music_assistant_url", musicAssistantBaseUrl)
-                    .putString("music_assistant_token", musicAssistantToken)
-                    .putString("popularity_scope", popularityScope.name)
-                    .putBoolean("show_persistent_mini_player", showPersistentMiniPlayer)
-                    .apply()
-
-                loadPopularity()
-                musicState = MusicUiState()
-                if (musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank()) {
-                    loadMusic()
-                }
-            }
-            .setNeutralButton("Jellyfin settings") { _, _ ->
-                startActivity(Intent(this, PreferencesActivity::class.java))
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        settingsLauncher.launch(Intent(this, MobileSettingsActivity::class.java))
     }
 
     private fun playItem(item: BaseItemDto) {
