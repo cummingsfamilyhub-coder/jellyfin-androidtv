@@ -135,6 +135,12 @@ jobs:
           curl -fL --retry 3 "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Max_2025_logo.svg/960px-Max_2025_logo.svg.png" -o app/src/main/res/drawable-nodpi/service_max.png
           file app/src/main/res/drawable-nodpi/service_*.png
 
+      - name: Restore stable Vesper debug signing key
+        run: |
+          mkdir -p ~/.android
+          base64 --decode .github/vesper-debug.keystore.b64 > ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+
       - name: Build mobile debug APK
         run: |
           chmod +x ./gradlew
