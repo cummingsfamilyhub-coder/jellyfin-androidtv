@@ -81,11 +81,13 @@ class MobileStartupActivity : FragmentActivity() {
     private var busy by mutableStateOf(false)
     private var error by mutableStateOf<String?>(null)
     private var storedServers by mutableStateOf<List<Server>>(emptyList())
+    private var profileSwitchMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val switchServerId = intent.getStringExtra(EXTRA_SWITCH_SERVER_ID)?.let(UUID::fromString)
+        profileSwitchMode = intent.getBooleanExtra(EXTRA_PROFILE_SWITCH, false)
 
         lifecycleScope.launch {
             // SessionInitializer restores in the background, but the mobile launcher can
@@ -234,7 +236,14 @@ class MobileStartupActivity : FragmentActivity() {
                     }
                     is ApiClientErrorLoginState -> {
                         busy = false
-                        error = "Couldn't sign in to Jellyfin. Check your connection and try again."
+                        if (user.accessToken != null) {
+                            username = user.name
+                            password = ""
+                            error = "Saved sign-in expired. Enter the password once to refresh this profile."
+                            stage = LoginStage.PASSWORD
+                        } else {
+                            error = "Couldn't sign in to Jellyfin. Check your connection and try again."
+                        }
                     }
                     AuthenticatingState -> busy = true
                 }
@@ -307,7 +316,12 @@ class MobileStartupActivity : FragmentActivity() {
     private fun finishLogin() {
         lifecycleScope.launch {
             (application as? JellyfinApplication)?.onSessionStart()
-            openHome()
+            if (profileSwitchMode) {
+                setResult(RESULT_OK)
+                finish()
+            } else {
+                openHome()
+            }
         }
     }
 
@@ -320,7 +334,10 @@ class MobileStartupActivity : FragmentActivity() {
         error = null
         when (stage) {
             LoginStage.SERVER -> finish()
-            LoginStage.USERS -> stage = LoginStage.SERVER
+            LoginStage.USERS -> {
+                if (profileSwitchMode) finish()
+                else stage = LoginStage.SERVER
+            }
             LoginStage.PASSWORD -> stage = LoginStage.USERS
             LoginStage.MANUAL -> stage = LoginStage.USERS
         }
@@ -328,6 +345,7 @@ class MobileStartupActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_SWITCH_SERVER_ID = "switch_server_id"
+        const val EXTRA_PROFILE_SWITCH = "profile_switch"
     }
 }
 
