@@ -2048,7 +2048,9 @@ private fun MaMediaRow(
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (!item.imageUrl.isNullOrBlank()) {
+                        if (item.mediaType == "playlist") {
+                            VesperPlaylistArtwork(item.name)
+                        } else if (!item.imageUrl.isNullOrBlank()) {
                             AsyncImage(
                                 modifier = Modifier.fillMaxSize(),
                                 url = item.imageUrl,
@@ -2081,6 +2083,51 @@ private fun MaMediaRow(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun VesperPlaylistArtwork(
+    name: String,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF28204C),
+                        Color(0xFF18294A),
+                        Color(0xFF0E1828),
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            BasicText(
+                "≡♫",
+                style = TextStyle(
+                    color = Color(0xFFB39AFF),
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                ),
+            )
+            Spacer(Modifier.height(7.dp))
+            BasicText(
+                name.take(18),
+                style = TextStyle(
+                    color = Color(0xFFD8D2F3),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                maxLines = 1,
+            )
         }
     }
 }
