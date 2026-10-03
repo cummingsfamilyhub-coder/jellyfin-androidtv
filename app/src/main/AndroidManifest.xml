@@ -133,6 +133,20 @@
             android:name=".startup.StartupActivity"
             android:targetActivity=".ui.startup.StartupActivity" />
 
+        <!-- Touch-first Vesper mobile application -->
+        <activity
+            android:name=".ui.mobile.MobileStartupActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.mobile.MobileMainActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.mobile.MobilePlayerActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustNothing" />
+
         <!-- Main application -->
         <activity
             android:name=".ui.browsing.MainActivity"
