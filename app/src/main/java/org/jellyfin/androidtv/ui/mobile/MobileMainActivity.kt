@@ -1329,6 +1329,8 @@ private fun VesperMobile(
     onSettings: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
+    var showNowPlaying by remember { mutableStateOf(false) }
+    var showNowPlayingRooms by remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         Modifier
@@ -1364,6 +1366,15 @@ private fun VesperMobile(
             val openTab: (MobileTab) -> Unit = { destination ->
                 tab = destination
                 onTabSelected(destination)
+            }
+
+            val persistentMusicPlayer = musicState.snapshot.players.firstOrNull {
+                it.playbackState in setOf("playing", "paused") &&
+                    !it.currentTitle.isNullOrBlank() &&
+                    it.syncedTo == null
+            } ?: musicState.snapshot.players.firstOrNull {
+                it.playbackState in setOf("playing", "paused") &&
+                    !it.currentTitle.isNullOrBlank()
             }
 
             when (tab) {
@@ -1460,13 +1471,372 @@ private fun VesperMobile(
                 )
             }
 
+            persistentMusicPlayer?.let { player ->
+                VesperMiniPlayer(
+                    player = player,
+                    onOpen = { showNowPlaying = true },
+                    onPlayPause = {
+                        onControlMusic(player, MusicPlayerAction.PLAY_PAUSE)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 26.dp, bottom = 92.dp),
+                )
+            }
+
             MobileNavDock(
                 active = tab,
                 onSelect = openTab,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
+
+            if (showNowPlaying && persistentMusicPlayer != null) {
+                VesperNowPlaying(
+                    player = persistentMusicPlayer,
+                    onDismiss = { showNowPlaying = false },
+                    onControl = { action ->
+                        onControlMusic(persistentMusicPlayer, action)
+                    },
+                    onRooms = { showNowPlayingRooms = true },
+                )
+            }
+
+            if (showNowPlayingRooms && persistentMusicPlayer != null) {
+                MusicGroupManager(
+                    player = persistentMusicPlayer,
+                    players = musicState.snapshot.players,
+                    onDismiss = { showNowPlayingRooms = false },
+                    onSave = { selectedIds ->
+                        showNowPlayingRooms = false
+                        onUpdateMusicGroup(persistentMusicPlayer, selectedIds)
+                    },
+                )
+            }
         }
 
+    }
+}
+
+@Composable
+private fun VesperMiniPlayer(
+    player: MaPlayer,
+    onOpen: () -> Unit,
+    onPlayPause: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(62.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xF01A1B28))
+            .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF111B2C)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!player.currentImageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = player.currentImageUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    "♫",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(10.dp))
+
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                player.currentTitle ?: "Music",
+                style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(2.dp))
+            BasicText(
+                listOfNotNull(
+                    player.currentArtist,
+                    player.name,
+                ).joinToString(" · "),
+                style = TextStyle(color = Color(0xFF8E97A4), fontSize = 9.sp),
+                maxLines = 1,
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(21.dp))
+                .background(Color(0xFFEAF4FB))
+                .clickable(onClick = onPlayPause),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                if (player.playbackState == "playing") "Ⅱ" else "▶",
+                style = TextStyle(
+                    color = Color(0xFF101820),
+                    fontSize = if (player.playbackState == "playing") 15.sp else 19.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun VesperNowPlaying(
+    player: MaPlayer,
+    onDismiss: () -> Unit,
+    onControl: (MusicPlayerAction) -> Unit,
+    onRooms: () -> Unit,
+) {
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF06090E))
+                .padding(horizontal = 24.dp, vertical = 22.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(21.dp))
+                            .background(Color(0x22FFFFFF))
+                            .clickable(onClick = onDismiss),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText("⌄", style = TextStyle(color = Color.White, fontSize = 24.sp))
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    BasicText(
+                        "NOW PLAYING",
+                        style = TextStyle(
+                            color = Color(0xFFA98CFF),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.8.sp,
+                        ),
+                    )
+
+                    Spacer(Modifier.weight(1f))
+                    Spacer(Modifier.width(42.dp))
+                }
+
+                Spacer(Modifier.height(26.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(30.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    Color(0xFF201A3B),
+                                    Color(0xFF101A2A),
+                                    Color(0xFF0B1018),
+                                )
+                            )
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!player.currentImageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            modifier = Modifier.fillMaxSize(),
+                            url = player.currentImageUrl,
+                            scaleType = ImageView.ScaleType.CENTER_CROP,
+                        )
+                    } else {
+                        BasicText(
+                            "♫",
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 86.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                BasicText(
+                    player.currentTitle ?: "Nothing playing",
+                    style = TextStyle(
+                        color = Color.White,
+                        fontSize = 25.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 29.sp,
+                    ),
+                    maxLines = 2,
+                )
+
+                if (!player.currentArtist.isNullOrBlank()) {
+                    Spacer(Modifier.height(7.dp))
+                    BasicText(
+                        player.currentArtist,
+                        style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 15.sp),
+                        maxLines = 1,
+                    )
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                val queueSummary = when {
+                    player.currentMediaType in setOf("radio", "audio_source") -> "Live"
+                    player.queueItemCount > 0 && player.queueCurrentIndex != null ->
+                        "Track ${player.queueCurrentIndex + 1} of ${player.queueItemCount}"
+                    else -> "Playing"
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0x99121722))
+                        .padding(horizontal = 15.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        BasicText(
+                            player.name,
+                            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        BasicText(
+                            queueSummary,
+                            style = TextStyle(color = Color(0xFF8A93A1), fontSize = 10.sp),
+                        )
+                    }
+
+                    if (player.volumeLevel != null) {
+                        BasicText(
+                            "${player.volumeLevel}%",
+                            style = TextStyle(color = Color(0xFFC8B9FF), fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MusicCircleButton(
+                        label = "‹",
+                        enabled = player.canPrevious,
+                    ) { onControl(MusicPlayerAction.PREVIOUS) }
+
+                    Spacer(Modifier.width(22.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .size(66.dp)
+                            .clip(RoundedCornerShape(33.dp))
+                            .background(Color(0xFFEAF4FB))
+                            .clickable { onControl(MusicPlayerAction.PLAY_PAUSE) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(
+                            if (player.playbackState == "playing") "Ⅱ" else "▶",
+                            style = TextStyle(
+                                color = Color(0xFF101820),
+                                fontSize = if (player.playbackState == "playing") 22.sp else 28.sp,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                        )
+                    }
+
+                    Spacer(Modifier.width(22.dp))
+
+                    MusicCircleButton(
+                        label = "›",
+                        enabled = player.canNext,
+                    ) { onControl(MusicPlayerAction.NEXT) }
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFF141A25))
+                            .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
+                            .clickable(onClick = onRooms),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(
+                            "Rooms",
+                            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+
+                    if (player.volumeLevel != null) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color(0xFF141A25))
+                                .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                BasicText(
+                                    "−",
+                                    modifier = Modifier
+                                        .clickable { onControl(MusicPlayerAction.VOLUME_DOWN) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                                )
+                                BasicText(
+                                    "${player.volumeLevel}%",
+                                    style = TextStyle(color = Color(0xFFC8B9FF), fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                                )
+                                BasicText(
+                                    "+",
+                                    modifier = Modifier
+                                        .clickable { onControl(MusicPlayerAction.VOLUME_UP) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
