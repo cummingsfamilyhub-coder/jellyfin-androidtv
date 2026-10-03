@@ -1573,6 +1573,7 @@ private fun MusicHub(
 ) {
     var pendingItem by remember { mutableStateOf<MaMediaItem?>(null) }
     var selectedPlayerId by remember { mutableStateOf<String?>(null) }
+    var manageGroupPlayerId by remember { mutableStateOf<String?>(null) }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -1685,9 +1686,9 @@ private fun MusicHub(
                 item = item,
                 players = state.snapshot.players,
                 onDismiss = { pendingItem = null },
-                onPlay = { player ->
+                onPlay = { selectedPlayers ->
                     pendingItem = null
-                    onPlay(item, player)
+                    onPlay(item, selectedPlayers)
                 },
             )
         }
@@ -1696,9 +1697,27 @@ private fun MusicHub(
             state.snapshot.players.firstOrNull { it.playerId == playerId }?.let { player ->
                 MusicPlayerControlPopup(
                     player = player,
+                    allPlayers = state.snapshot.players,
                     onDismiss = { selectedPlayerId = null },
                     onControl = { action ->
                         onControl(player, action)
+                    },
+                    onManageRooms = {
+                        manageGroupPlayerId = player.playerId
+                    },
+                )
+            }
+        }
+
+        manageGroupPlayerId?.let { playerId ->
+            state.snapshot.players.firstOrNull { it.playerId == playerId }?.let { player ->
+                MusicGroupManager(
+                    player = player,
+                    players = state.snapshot.players,
+                    onDismiss = { manageGroupPlayerId = null },
+                    onSave = { selectedIds ->
+                        manageGroupPlayerId = null
+                        onUpdateGroup(player, selectedIds)
                     },
                 )
             }
