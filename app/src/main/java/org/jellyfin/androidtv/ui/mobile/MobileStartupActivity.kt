@@ -78,6 +78,8 @@ class MobileStartupActivity : FragmentActivity() {
     private var selectedUser by mutableStateOf<User?>(null)
     private var username by mutableStateOf("")
     private var password by mutableStateOf("")
+    private var pin by mutableStateOf("")
+    private var resetPinAfterPassword by mutableStateOf(false)
     private var busy by mutableStateOf(false)
     private var error by mutableStateOf<String?>(null)
     private var storedServers by mutableStateOf<List<Server>>(emptyList())
@@ -118,6 +120,7 @@ class MobileStartupActivity : FragmentActivity() {
                 selectedUser = selectedUser,
                 username = username,
                 password = password,
+                pin = pin,
                 busy = busy,
                 error = error,
                 storedServers = storedServers,
@@ -129,6 +132,11 @@ class MobileStartupActivity : FragmentActivity() {
                 onStoredServer = ::openServer,
                 onUser = ::chooseUser,
                 onPasswordLogin = ::loginSelectedUser,
+                onPinDigit = ::enterPinDigit,
+                onPinBackspace = {
+                    if (pin.isNotEmpty()) pin = pin.dropLast(1)
+                },
+                onForgotPin = ::recoverWithPassword,
                 onManual = {
                     username = ""
                     password = ""
@@ -211,6 +219,20 @@ class MobileStartupActivity : FragmentActivity() {
         val currentServer = server ?: return
         selectedUser = user
         password = ""
+        pin = ""
+        resetPinAfterPassword = false
+        busy = false
+        error = null
+
+        if (VesperProfilePinStore.hasPin(this, currentServer.id, user.id)) {
+            stage = LoginStage.PIN
+            return
+        }
+
+        authenticateRememberedUser(currentServer, user)
+    }
+
+    private fun authenticateRememberedUser(currentServer: Server, user: User) {
         busy = true
         error = null
 
@@ -224,6 +246,7 @@ class MobileStartupActivity : FragmentActivity() {
                     RequireSignInState -> {
                         busy = false
                         username = user.name
+                        resetPinAfterPassword = false
                         stage = LoginStage.PASSWORD
                     }
                     is ServerVersionNotSupported -> {
@@ -239,6 +262,7 @@ class MobileStartupActivity : FragmentActivity() {
                         if (user.accessToken != null) {
                             username = user.name
                             password = ""
+                            resetPinAfterPassword = false
                             error = "Saved sign-in expired. Enter the password once to refresh this profile."
                             stage = LoginStage.PASSWORD
                         } else {
@@ -249,6 +273,36 @@ class MobileStartupActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    private fun enterPinDigit(digit: String) {
+        val currentServer = server ?: return
+        val user = selectedUser ?: return
+        if (busy || pin.length >= 4 || digit.length != 1 || !digit[0].isDigit()) return
+
+        val next = pin + digit
+        pin = next
+        error = null
+
+        if (next.length == 4) {
+            if (VesperProfilePinStore.verifyPin(this, currentServer.id, user.id, next)) {
+                pin = ""
+                authenticateRememberedUser(currentServer, user)
+            } else {
+                pin = ""
+                error = "That PIN wasn't right. Try again."
+            }
+        }
+    }
+
+    private fun recoverWithPassword() {
+        val user = selectedUser ?: return
+        username = user.name
+        password = ""
+        pin = ""
+        resetPinAfterPassword = true
+        error = "Enter the Jellyfin password to reset this Vesper PIN."
+        stage = LoginStage.PASSWORD
     }
 
     private fun loginSelectedUser() {
@@ -279,6 +333,13 @@ class MobileStartupActivity : FragmentActivity() {
                 when (state) {
                     AuthenticatedState -> {
                         busy = false
+                        if (resetPinAfterPassword) {
+                            val activeUser = selectedUser
+                            if (activeUser != null) {
+                                VesperProfilePinStore.removePin(this@MobileStartupActivity, currentServer.id, activeUser.id)
+                            }
+                            resetPinAfterPassword = false
+                        }
                         finishLogin()
                     }
                     is ServerVersionNotSupported -> {
@@ -338,7 +399,14 @@ class MobileStartupActivity : FragmentActivity() {
                 if (profileSwitchMode) finish()
                 else stage = LoginStage.SERVER
             }
-            LoginStage.PASSWORD -> stage = LoginStage.USERS
+            LoginStage.PIN -> {
+                pin = ""
+                stage = LoginStage.USERS
+            }
+            LoginStage.PASSWORD -> {
+                resetPinAfterPassword = false
+                stage = LoginStage.USERS
+            }
             LoginStage.MANUAL -> stage = LoginStage.USERS
         }
     }
@@ -349,7 +417,7 @@ class MobileStartupActivity : FragmentActivity() {
     }
 }
 
-private enum class LoginStage { SERVER, USERS, PASSWORD, MANUAL }
+private enum class LoginStage { SERVER, USERS, PIN, PASSWORD, MANUAL }
 
 @Composable
 private fun MobileLoginScreen(
@@ -360,6 +428,7 @@ private fun MobileLoginScreen(
     selectedUser: User?,
     username: String,
     password: String,
+    pin: String,
     busy: Boolean,
     error: String?,
     storedServers: List<Server>,
@@ -371,6 +440,9 @@ private fun MobileLoginScreen(
     onStoredServer: (Server) -> Unit,
     onUser: (User) -> Unit,
     onPasswordLogin: () -> Unit,
+    onPinDigit: (String) -> Unit,
+    onPinBackspace: () -> Unit,
+    onForgotPin: () -> Unit,
     onManual: () -> Unit,
     onManualLogin: () -> Unit,
     onBack: () -> Unit,
@@ -394,6 +466,7 @@ private fun MobileLoginScreen(
                             when (stage) {
                                 LoginStage.SERVER -> "Connect to Jellyfin"
                                 LoginStage.USERS -> server?.name ?: "Choose a user"
+                                LoginStage.PIN -> selectedUser?.name ?: "Enter PIN"
                                 LoginStage.PASSWORD -> selectedUser?.name ?: "Sign in"
                                 LoginStage.MANUAL -> "Sign in with username"
                             },
@@ -437,6 +510,31 @@ private fun MobileLoginScreen(
                             Spacer(Modifier.height(12.dp))
                             SecondaryButton("‹ Change server", onBack)
                         }
+                    }
+                }
+
+                LoginStage.PIN -> item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        BasicText(
+                            "Enter PIN for ${selectedUser?.name.orEmpty()}",
+                            style = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                        )
+                        Spacer(Modifier.height(7.dp))
+                        MutedText("Your Jellyfin password stays safely underneath this local Vesper PIN.")
+                        Spacer(Modifier.height(22.dp))
+                        LoginPinDots(pin.length)
+                        Spacer(Modifier.height(18.dp))
+                        VesperPinPad(
+                            onDigit = onPinDigit,
+                            onBackspace = onPinBackspace,
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        SecondaryButton("Forgot PIN? Use Jellyfin password", onForgotPin)
+                        Spacer(Modifier.height(10.dp))
+                        SecondaryButton("‹ Back to users", onBack)
                     }
                 }
 
@@ -500,14 +598,34 @@ private fun UserRow(user: User, server: Server?, userImage: (Server, User) -> St
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(13.dp)).background(Color(0xFF101821)).clickable { onClick(user) }.padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(54.dp).clip(RoundedCornerShape(27.dp)).background(Color(0xFF1B2D3A))) {
-            if (server != null) {
-                AsyncImage(modifier = Modifier.fillMaxSize(), url = userImage(server, user), scaleType = ImageView.ScaleType.CENTER_CROP)
-            }
-            BasicText(user.name.take(1).uppercase(), style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold), modifier = Modifier.align(Alignment.Center))
-        }
+        VesperProfileAvatar(
+            name = user.name,
+            imageUrl = server?.let { userImage(it, user) },
+            modifier = Modifier.size(54.dp),
+        )
         Spacer(Modifier.width(14.dp))
         BasicText(user.name, style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold))
+    }
+}
+
+@Composable
+private fun LoginPinDots(length: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+    ) {
+        repeat(4) { index ->
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 7.dp)
+                    .size(16.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (index < length) Color(0xFF9B83FF)
+                        else Color(0xFF303543)
+                    ),
+            )
+        }
     }
 }
 
