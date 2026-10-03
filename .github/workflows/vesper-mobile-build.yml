@@ -137,9 +137,9 @@ jobs:
 
       - name: Restore stable Vesper debug signing key
         run: |
-          mkdir -p ~/.android
-          base64 --decode .github/vesper-debug.keystore.b64 > ~/.android/debug.keystore
-          chmod 600 ~/.android/debug.keystore
+          base64 --decode .github/vesper-debug.keystore.b64 > .github/vesper-debug.keystore
+          chmod 600 .github/vesper-debug.keystore
+          keytool -list -v -keystore .github/vesper-debug.keystore -storepass android -alias androiddebugkey | grep -E "SHA1:|SHA256:"
 
       - name: Build mobile debug APK
         run: |
