@@ -2289,14 +2289,13 @@ private fun MusicRoomPicker(
             if (selectedRooms.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 VesperButton(
-                    if (selectedRooms.size == 1) {
+                    label = if (selectedRooms.size == 1) {
                         "Play in ${selectedRooms.first().name}"
                     } else {
                         "Play on ${selectedRooms.size} rooms"
-                    }
-                ) {
-                    onPlay(selectedRooms)
-                }
+                    },
+                    onClick = { onPlay(selectedRooms) },
+                )
             }
         }
     }
@@ -2725,14 +2724,13 @@ private fun MusicGroupManager(
 
             Spacer(Modifier.height(10.dp))
             VesperButton(
-                if (selectedIds.size > 1) {
+                label = if (selectedIds.size > 1) {
                     "Update ${selectedIds.size} rooms"
                 } else {
                     "Play in ${player.name} only"
-                }
-            ) {
-                onSave(selectedIds)
-            }
+                },
+                onClick = { onSave(selectedIds) },
+            )
         }
     }
 }
