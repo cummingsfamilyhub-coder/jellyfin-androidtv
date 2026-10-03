@@ -22,6 +22,7 @@ internal data class MaMediaItem(
 
 internal data class MaPlayer(
     val playerId: String,
+    val provider: String,
     val name: String,
     val type: String,
     val available: Boolean,
