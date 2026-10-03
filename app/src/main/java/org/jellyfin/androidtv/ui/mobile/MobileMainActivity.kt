@@ -1465,76 +1465,611 @@ private fun VideoHub(
 
 @Composable
 private fun MusicHub(
+    state: MusicUiState,
+    configured: Boolean,
     userName: String,
+    onRetry: () -> Unit,
+    onPlay: (MaMediaItem, MaPlayer) -> Unit,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
+    var pendingItem by remember { mutableStateOf<MaMediaItem?>(null) }
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
+        ) {
+            item {
+                MobileSectionTopBar(
+                    title = "Music",
+                    subtitle = "Artists · Albums · Radio · Rooms",
+                    userName = userName,
+                    onSwitchProfile = onSwitchProfile,
+                    onSettings = onSettings,
+                )
+            }
+
+            when {
+                !configured -> item {
+                    MusicConnectPanel(onSettings = onSettings)
+                }
+
+                state.loading -> item {
+                    MusicLoadingPanel()
+                }
+
+                state.error != null -> item {
+                    MusicErrorPanel(
+                        message = state.error,
+                        onRetry = onRetry,
+                        onSettings = onSettings,
+                    )
+                }
+
+                state.loaded -> {
+                    val snapshot = state.snapshot
+                    item {
+                        MusicHero(
+                            snapshot = snapshot,
+                            onPlay = { item ->
+                                if (item.playable) pendingItem = item
+                            },
+                        )
+                    }
+
+                    if (snapshot.recentlyPlayed.isNotEmpty()) item {
+                        MaMediaRow(
+                            title = "Recently Played",
+                            items = snapshot.recentlyPlayed,
+                            onClick = { item ->
+                                if (item.playable) pendingItem = item
+                            },
+                        )
+                    }
+
+                    if (snapshot.albums.isNotEmpty()) item {
+                        MaMediaRow(
+                            title = "Albums",
+                            items = snapshot.albums,
+                            onClick = { item ->
+                                if (item.playable) pendingItem = item
+                            },
+                        )
+                    }
+
+                    if (snapshot.artists.isNotEmpty()) item {
+                        MaMediaRow(
+                            title = "Artists",
+                            items = snapshot.artists,
+                            onClick = { item ->
+                                if (item.playable) pendingItem = item
+                            },
+                            artistStyle = true,
+                        )
+                    }
+
+                    if (snapshot.radios.isNotEmpty()) item {
+                        MaMediaRow(
+                            title = "Radio",
+                            items = snapshot.radios,
+                            onClick = { item ->
+                                if (item.playable) pendingItem = item
+                            },
+                        )
+                    }
+
+                    if (snapshot.playlists.isNotEmpty()) item {
+                        MaMediaRow(
+                            title = "Playlists",
+                            items = snapshot.playlists,
+                            onClick = { item ->
+                                if (item.playable) pendingItem = item
+                            },
+                        )
+                    }
+
+                    if (snapshot.players.isNotEmpty()) item {
+                        MaPlayerRow(snapshot.players)
+                    }
+                }
+            }
+        }
+
+        pendingItem?.let { item ->
+            MusicRoomPicker(
+                item = item,
+                players = state.snapshot.players,
+                onDismiss = { pendingItem = null },
+                onPlay = { player ->
+                    pendingItem = null
+                    onPlay(item, player)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MusicConnectPanel(
+    onSettings: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF1A1631),
+                        Color(0xFF10182B),
+                        Color(0xFF07121D),
+                    )
+                )
+            )
+            .border(1.dp, Color(0x554D42A6), RoundedCornerShape(24.dp))
+            .padding(22.dp),
     ) {
-        item {
-            MobileSectionTopBar(
-                title = "Music",
-                subtitle = "Artists · Albums · Radio · Rooms",
-                userName = userName,
-                onSwitchProfile = onSwitchProfile,
-                onSettings = onSettings,
-            )
-        }
-
-        item {
-            PlaceholderHero(
-                eyebrow = "MUSIC",
-                title = "A deeper listen",
-                subtitle = "Your own library, radio and room playback in one place.",
-                action = "Music Assistant integration next",
-                icon = "♫",
-            )
-        }
-
-        item {
-            PlaceholderTileRow(
-                title = "Recently Played",
-                items = listOf(
-                    "Recently played" to "Your listening history",
-                    "Radio" to "Clyde 1 and favourites",
-                    "Queue" to "Pick up where you left off",
+        Column {
+            BasicText(
+                "MUSIC ASSISTANT",
+                style = TextStyle(
+                    color = Color(0xFFA98CFF),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
                 ),
             )
+            Spacer(Modifier.height(8.dp))
+            BasicText(
+                "Connect your music",
+                style = TextStyle(color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold),
+            )
+            Spacer(Modifier.height(7.dp))
+            BasicText(
+                "Vesper will use Music Assistant for your library, rooms, queues and playback.",
+                style = TextStyle(color = Color(0xFFA7B1BD), fontSize = 13.sp, lineHeight = 18.sp),
+            )
+            Spacer(Modifier.height(16.dp))
+            VesperButton("Connect Music Assistant", onSettings)
         }
+    }
+}
 
-        item {
-            PlaceholderTileRow(
-                title = "Made for You",
-                items = listOf(
-                    "Discover" to "Fresh music from your library",
-                    "Chill Mix" to "A calmer queue",
-                    "Deep Focus" to "Music for getting stuff done",
-                ),
+@Composable
+private fun MusicLoadingPanel() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xFF111722))
+            .border(1.dp, Color(0x334D42A6), RoundedCornerShape(24.dp))
+            .padding(24.dp),
+    ) {
+        Column {
+            BasicText(
+                "Loading your music…",
+                style = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+            )
+            Spacer(Modifier.height(6.dp))
+            BasicText(
+                "Artists, albums, radio and rooms are coming from Music Assistant.",
+                style = TextStyle(color = Color(0xFF8C96A5), fontSize = 13.sp),
             )
         }
+    }
+}
 
-        item {
-            PlaceholderTileRow(
-                title = "Artists",
-                items = listOf(
-                    "Artists" to "Browse by artist",
-                    "Albums" to "Your local collection",
-                    "Playlists" to "Saved queues and mixes",
-                ),
+@Composable
+private fun MusicErrorPanel(
+    message: String,
+    onRetry: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xFF17131D))
+            .border(1.dp, Color(0x554D3348), RoundedCornerShape(24.dp))
+            .padding(22.dp),
+    ) {
+        BasicText(
+            "Music Assistant needs attention",
+            style = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+        )
+        Spacer(Modifier.height(7.dp))
+        BasicText(
+            message,
+            style = TextStyle(color = Color(0xFFB8AAB5), fontSize = 13.sp, lineHeight = 18.sp),
+        )
+        Spacer(Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            VesperButton("Try again", onRetry)
+            DarkButton("Settings", onSettings)
+        }
+    }
+}
+
+@Composable
+private fun MusicHero(
+    snapshot: MusicAssistantSnapshot,
+    onPlay: (MaMediaItem) -> Unit,
+) {
+    val active = snapshot.players.firstOrNull {
+        it.playbackState == "playing" && !it.currentTitle.isNullOrBlank()
+    }
+    val recent = snapshot.recentlyPlayed.firstOrNull()
+
+    val imageUrl = active?.currentImageUrl ?: recent?.imageUrl
+    val eyebrow = if (active != null) "NOW PLAYING" else "YOUR MUSIC"
+    val title = active?.currentTitle ?: recent?.name ?: "A deeper listen"
+    val subtitle = when {
+        active != null -> listOfNotNull(
+            active.currentArtist,
+            active.name,
+            active.volumeLevel?.let { "$it%" },
+        ).joinToString("  ·  ")
+        recent != null -> recent.subtitle.ifBlank { "Pick up where you left off" }
+        else -> "Music Assistant is connected and ready."
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+            .padding(horizontal = 18.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF1B1731),
+                        Color(0xFF10192B),
+                        Color(0xFF08111C),
+                    )
+                )
             )
+            .border(1.dp, Color(0x554D42A6), RoundedCornerShape(24.dp)),
+    ) {
+        if (!imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxWidth(.48f)
+                    .height(220.dp),
+                url = imageUrl,
+                scaleType = ImageView.ScaleType.CENTER_CROP,
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxWidth(.58f)
+                    .height(220.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color(0xFF101624),
+                                Color(0xA0101624),
+                                Color.Transparent,
+                            )
+                        )
+                    )
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 24.dp)
+                    .size(112.dp)
+                    .clip(RoundedCornerShape(38.dp))
+                    .background(Color(0x242F6BFF)),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    "♫",
+                    style = TextStyle(color = Color(0xFF9D82FF), fontSize = 56.sp, fontWeight = FontWeight.Bold),
+                )
+            }
         }
 
-        item {
-            PlaceholderTileRow(
-                title = "Around the House",
-                items = listOf(
-                    "Living Room" to "Room playback",
-                    "Den" to "Room playback",
-                    "Kitchen" to "Room playback",
+        Column(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxWidth(.64f)
+                .padding(start = 22.dp),
+        ) {
+            BasicText(
+                eyebrow,
+                style = TextStyle(
+                    color = Color(0xFFA98CFF),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
                 ),
             )
+            Spacer(Modifier.height(7.dp))
+            BasicText(
+                title,
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = 27.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 30.sp,
+                ),
+                maxLines = 2,
+            )
+            if (subtitle.isNotBlank()) {
+                Spacer(Modifier.height(7.dp))
+                BasicText(
+                    subtitle,
+                    style = TextStyle(color = Color(0xFFA7B1BD), fontSize = 12.sp, lineHeight = 16.sp),
+                    maxLines = 2,
+                )
+            }
+            if (active == null && recent != null && recent.playable) {
+                Spacer(Modifier.height(13.dp))
+                VesperButton("Play somewhere", { onPlay(recent) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun MaMediaRow(
+    title: String,
+    items: List<MaMediaItem>,
+    onClick: (MaMediaItem) -> Unit,
+    artistStyle: Boolean = false,
+) {
+    Column(Modifier.padding(top = 10.dp)) {
+        BasicText(
+            "$title  ›",
+            style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+        )
+
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
+            items(items, key = { it.uri }) { item ->
+                Column(
+                    modifier = Modifier
+                        .width(132.dp)
+                        .clickable { onClick(item) },
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(132.dp)
+                            .clip(
+                                if (artistStyle) RoundedCornerShape(66.dp)
+                                else RoundedCornerShape(18.dp)
+                            )
+                            .background(Color(0xFF121A26))
+                            .border(
+                                1.dp,
+                                Color(0x333D4F73),
+                                if (artistStyle) RoundedCornerShape(66.dp)
+                                else RoundedCornerShape(18.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!item.imageUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                modifier = Modifier.fillMaxSize(),
+                                url = item.imageUrl,
+                                scaleType = ImageView.ScaleType.CENTER_CROP,
+                            )
+                        } else {
+                            BasicText(
+                                item.name.take(1).uppercase(),
+                                style = TextStyle(
+                                    color = Color(0xFFA98CFF),
+                                    fontSize = 36.sp,
+                                    fontWeight = FontWeight.Bold,
+                                ),
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(7.dp))
+                    BasicText(
+                        item.name,
+                        style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                    )
+                    if (item.subtitle.isNotBlank()) {
+                        BasicText(
+                            item.subtitle,
+                            style = TextStyle(color = Color(0xFF7F8793), fontSize = 10.sp),
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MaPlayerRow(
+    players: List<MaPlayer>,
+) {
+    Column(Modifier.padding(top = 10.dp)) {
+        BasicText(
+            "Around the House  ›",
+            style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+        )
+
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(players, key = { it.playerId }) { player ->
+                Row(
+                    modifier = Modifier
+                        .width(190.dp)
+                        .height(92.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xD5151B25))
+                        .border(
+                            1.dp,
+                            if (player.playbackState == "playing") Color(0x665B47D8)
+                            else Color(0x223D4F73),
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                if (player.playbackState == "playing") Color(0x443D2D9B)
+                                else Color(0x222F6BFF)
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(
+                            if (player.playbackState == "playing") "♫" else "◉",
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+
+                    Spacer(Modifier.width(11.dp))
+                    Column(Modifier.weight(1f)) {
+                        BasicText(
+                            player.name,
+                            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        BasicText(
+                            when {
+                                player.playbackState == "playing" && !player.currentTitle.isNullOrBlank() ->
+                                    "Playing · ${player.currentTitle}"
+                                player.playbackState == "paused" -> "Paused"
+                                else -> "Ready"
+                            },
+                            style = TextStyle(color = Color(0xFF818A98), fontSize = 10.sp),
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicRoomPicker(
+    item: MaMediaItem,
+    players: List<MaPlayer>,
+    onDismiss: () -> Unit,
+    onPlay: (MaPlayer) -> Unit,
+) {
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .width(340.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(Color(0xFA151722))
+                .border(1.dp, Color(0x665B47D8), RoundedCornerShape(26.dp))
+                .padding(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        "PLAY ON…",
+                        style = TextStyle(
+                            color = Color(0xFFA98CFF),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.8.sp,
+                        ),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    BasicText(
+                        item.name,
+                        style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 1,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0x22FFFFFF))
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText("×", style = TextStyle(color = Color.White, fontSize = 24.sp))
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            if (players.isEmpty()) {
+                BasicText(
+                    "No Music Assistant players are available.",
+                    style = TextStyle(color = Color(0xFFA7B1BD), fontSize = 13.sp),
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            } else {
+                players.take(10).forEach { player ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { onPlay(player) }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(13.dp))
+                                .background(Color(0x332F6BFF)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(
+                                "♫",
+                                style = TextStyle(color = Color(0xFFA98CFF), fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                            )
+                        }
+                        Spacer(Modifier.width(11.dp))
+                        Column(Modifier.weight(1f)) {
+                            BasicText(
+                                player.name,
+                                style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                            )
+                            BasicText(
+                                when {
+                                    player.playbackState == "playing" && !player.currentTitle.isNullOrBlank() ->
+                                        "Playing ${player.currentTitle}"
+                                    player.playbackState == "paused" -> "Paused"
+                                    else -> "Ready"
+                                },
+                                style = TextStyle(color = Color(0xFF818A98), fontSize = 10.sp),
+                                maxLines = 1,
+                            )
+                        }
+                        BasicText(
+                            "›",
+                            style = TextStyle(color = Color(0xFF8D91A0), fontSize = 24.sp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
