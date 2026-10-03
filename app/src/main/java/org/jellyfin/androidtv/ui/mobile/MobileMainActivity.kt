@@ -77,6 +77,7 @@ import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.jellyfin.androidtv.util.apiclient.getUrl
 import org.jellyfin.androidtv.util.apiclient.itemImages
 import org.jellyfin.androidtv.util.apiclient.itemBackdropImages
+import org.jellyfin.androidtv.util.apiclient.primaryImage
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
@@ -180,6 +181,7 @@ class MobileMainActivity : FragmentActivity() {
                 tmdbConfigured = tmdbApiKey.isNotBlank(),
                 selected = selected,
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
+                userAvatarUrl = userRepository.currentUser.value?.primaryImage?.getUrl(api),
                 api = api,
                 seerrConfigured = seerrApiKey.isNotBlank(),
                 onLibrarySearch = ::searchLibrary,
@@ -1161,6 +1163,7 @@ private fun VesperMobile(
     tmdbConfigured: Boolean,
     selected: BaseItemDto?,
     userName: String,
+    userAvatarUrl: String?,
     api: ApiClient,
     seerrConfigured: Boolean,
     onLibrarySearch: suspend (String) -> List<BaseItemDto>,
@@ -1233,6 +1236,7 @@ private fun VesperMobile(
                     state = state,
                     musicState = musicState,
                     userName = userName,
+                    userAvatarUrl = userAvatarUrl,
                     api = api,
                     onSelect = onSelect,
                     onRetry = onRetry,
@@ -1248,6 +1252,7 @@ private fun VesperMobile(
                     popularity = popularity,
                     popularityScope = popularityScope,
                     userName = userName,
+                    userAvatarUrl = userAvatarUrl,
                     api = api,
                     onSelect = onSelect,
                     onPlay = onPlay,
@@ -1261,6 +1266,7 @@ private fun VesperMobile(
                     state = musicState,
                     configured = musicConfigured,
                     userName = userName,
+                    userAvatarUrl = userAvatarUrl,
                     onRetry = onRetryMusic,
                     onPlay = onPlayMusic,
                     onControl = onControlMusic,
@@ -1270,6 +1276,7 @@ private fun VesperMobile(
                 )
                 MobileTab.BOOKS -> BooksHub(
                     userName = userName,
+                    userAvatarUrl = userAvatarUrl,
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
                 )
@@ -1713,6 +1720,7 @@ private fun VideoHub(
     popularity: PopularityState,
     popularityScope: PopularityScope,
     userName: String,
+    userAvatarUrl: String?,
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
     onPlay: (BaseItemDto) -> Unit,
@@ -1731,6 +1739,7 @@ private fun VideoHub(
                 title = "Video",
                 subtitle = "Movies · TV · Services",
                 userName = userName,
+                userAvatarUrl = userAvatarUrl,
                 onSwitchProfile = onSwitchProfile,
                 onSettings = onSettings,
             )
@@ -1815,6 +1824,7 @@ private fun MusicHub(
     state: MusicUiState,
     configured: Boolean,
     userName: String,
+    userAvatarUrl: String?,
     onRetry: () -> Unit,
     onPlay: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
@@ -1836,6 +1846,7 @@ private fun MusicHub(
                     title = "Music",
                     subtitle = "Artists · Albums · Radio · Rooms",
                     userName = userName,
+                    userAvatarUrl = userAvatarUrl,
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
                 )
@@ -3107,6 +3118,7 @@ private fun MusicGroupManager(
 @Composable
 private fun BooksHub(
     userName: String,
+    userAvatarUrl: String?,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -3119,6 +3131,7 @@ private fun BooksHub(
                 title = "Books",
                 subtitle = "Read · Listen · Resume",
                 userName = userName,
+                userAvatarUrl = userAvatarUrl,
                 onSwitchProfile = onSwitchProfile,
                 onSettings = onSettings,
             )
@@ -3176,6 +3189,7 @@ private fun MobileSectionTopBar(
     title: String,
     subtitle: String,
     userName: String,
+    userAvatarUrl: String?,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -3209,20 +3223,14 @@ private fun MobileSectionTopBar(
         }
 
         Box {
-            Box(
+            VesperProfileAvatar(
+                name = userName,
+                imageUrl = userAvatarUrl,
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(Color(0xFF1B1B49))
                     .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
                     .clickable { onSwitchProfile() },
-                contentAlignment = Alignment.Center,
-            ) {
-                BasicText(
-                    userName.take(1).uppercase(),
-                    style = TextStyle(color = Color(0xFFD0C6FF), fontSize = 17.sp, fontWeight = FontWeight.Bold),
-                )
-            }
+            )
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -3800,6 +3808,7 @@ private fun MobileHome(
     state: MobileHomeState,
     musicState: MusicUiState,
     userName: String,
+    userAvatarUrl: String?,
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
     onRetry: () -> Unit,
@@ -3817,6 +3826,7 @@ private fun MobileHome(
         item {
             MobileTopBar(
                 userName = userName,
+                userAvatarUrl = userAvatarUrl,
                 onSwitchProfile = onSwitchProfile,
                 onSettings = onSettings,
             )
@@ -4158,6 +4168,7 @@ private fun HomeQuickAccessChip(
 @Composable
 private fun MobileTopBar(
     userName: String,
+    userAvatarUrl: String?,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -4192,20 +4203,14 @@ private fun MobileTopBar(
         }
 
         Box {
-            Box(
+            VesperProfileAvatar(
+                name = userName,
+                imageUrl = userAvatarUrl,
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(Color(0xFF1B1B49))
                     .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
                     .clickable { menuOpen = true },
-                contentAlignment = Alignment.Center,
-            ) {
-                BasicText(
-                    userName.take(1).uppercase(),
-                    style = TextStyle(color = Color(0xFFD0C6FF), fontSize = 17.sp, fontWeight = FontWeight.Bold),
-                )
-            }
+            )
 
             if (menuOpen) {
                 Popup(
