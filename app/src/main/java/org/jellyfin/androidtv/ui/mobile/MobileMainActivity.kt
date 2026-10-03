@@ -1717,7 +1717,12 @@ private fun MusicHub(
                         onControl(player, action)
                     },
                     onManageRooms = {
-                        val groupTarget = player.syncedTo ?: player.activeGroup ?: player.playerId
+                        val knownPlayerIds = state.snapshot.players.map { it.playerId }.toSet()
+                        val groupTarget = listOfNotNull(
+                            player.syncedTo,
+                            player.activeGroup,
+                            player.playerId,
+                        ).firstOrNull { it in knownPlayerIds } ?: player.playerId
                         selectedPlayerId = null
                         manageGroupPlayerId = groupTarget
                     },
