@@ -1480,7 +1480,7 @@ private fun VesperMobile(
                     },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(horizontal = 26.dp, bottom = 92.dp),
+                        .padding(start = 26.dp, end = 26.dp, bottom = 92.dp),
                 )
             }
 
