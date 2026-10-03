@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.ui.mobile
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -192,13 +193,25 @@ internal class MusicAssistantClient(
                 )
             }
 
-            val response = JSONObject(body)
-            if (response.has("error_code")) {
-                val details = response.optString("details").ifBlank { "Music Assistant command failed." }
+            if (body.isBlank()) return null
+
+            // Music Assistant's HTTP /api endpoint returns the command result directly.
+            // Library commands therefore return a top-level JSON array, while some
+            // commands return an object, primitive or null. Keep compatibility with
+            // wrapped JSON-RPC-style responses as well.
+            val response = JSONTokener(body).nextValue()
+            if (response is JSONObject && response.has("error_code")) {
+                val details = response.optString("details").ifBlank {
+                    "Music Assistant command failed."
+                }
                 throw IllegalStateException(details)
             }
 
-            return response.opt("result")
+            return if (response is JSONObject && response.has("result")) {
+                response.opt("result")
+            } else {
+                response
+            }
         } finally {
             connection.disconnect()
         }
