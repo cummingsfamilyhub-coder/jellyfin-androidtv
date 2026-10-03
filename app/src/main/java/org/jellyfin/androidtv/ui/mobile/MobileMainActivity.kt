@@ -2166,8 +2166,14 @@ private fun musicPlayersCompatible(
     candidate: MaPlayer,
 ): Boolean {
     if (primary.playerId == candidate.playerId) return true
+
+    // Music Assistant can expose grouping compatibility either as explicit
+    // player ids OR as a provider instance id meaning "all players from this
+    // provider". Honour both forms.
     return candidate.playerId in primary.canGroupWith ||
-        primary.playerId in candidate.canGroupWith
+        candidate.provider in primary.canGroupWith ||
+        primary.playerId in candidate.canGroupWith ||
+        primary.provider in candidate.canGroupWith
 }
 
 @Composable
