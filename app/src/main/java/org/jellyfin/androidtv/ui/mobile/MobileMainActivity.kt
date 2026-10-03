@@ -1526,7 +1526,7 @@ private fun MusicHub(
     onSettings: () -> Unit,
 ) {
     var pendingItem by remember { mutableStateOf<MaMediaItem?>(null) }
-    var selectedPlayer by remember { mutableStateOf<MaPlayer?>(null) }
+    var selectedPlayerId by remember { mutableStateOf<String?>(null) }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -1569,7 +1569,7 @@ private fun MusicHub(
                                 if (item.playable) pendingItem = item
                             },
                             onControl = onControl,
-                            onOpenPlayer = { selectedPlayer = it },
+                            onOpenPlayer = { selectedPlayerId = it.playerId },
                         )
                     }
 
@@ -1627,7 +1627,7 @@ private fun MusicHub(
                     if (snapshot.players.isNotEmpty()) item {
                         MaPlayerRow(
                             players = snapshot.players,
-                            onClick = { selectedPlayer = it },
+                            onClick = { selectedPlayerId = it.playerId },
                         )
                     }
                 }
@@ -1646,14 +1646,16 @@ private fun MusicHub(
             )
         }
 
-        selectedPlayer?.let { player ->
-            MusicPlayerControlPopup(
-                player = player,
-                onDismiss = { selectedPlayer = null },
-                onControl = { action ->
-                    onControl(player, action)
-                },
-            )
+        selectedPlayerId?.let { playerId ->
+            state.snapshot.players.firstOrNull { it.playerId == playerId }?.let { player ->
+                MusicPlayerControlPopup(
+                    player = player,
+                    onDismiss = { selectedPlayerId = null },
+                    onControl = { action ->
+                        onControl(player, action)
+                    },
+                )
+            }
         }
     }
 }
