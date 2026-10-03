@@ -1837,9 +1837,19 @@ private fun MusicHero(
     onOpenPlayer: (MaPlayer) -> Unit,
 ) {
     val active = snapshot.players.firstOrNull {
+        it.playbackState in setOf("playing", "paused") &&
+            !it.currentTitle.isNullOrBlank() &&
+            it.syncedTo == null
+    } ?: snapshot.players.firstOrNull {
         it.playbackState in setOf("playing", "paused") && !it.currentTitle.isNullOrBlank()
     }
     val recent = snapshot.recentlyPlayed.firstOrNull()
+    val activeRoomCount = active?.let { (it.groupMembers + it.playerId).distinct().size } ?: 0
+    val activeRoomLabel = when {
+        active == null -> null
+        activeRoomCount > 1 -> "$activeRoomCount rooms"
+        else -> active.name
+    }
 
     val imageUrl = active?.currentImageUrl ?: recent?.imageUrl
     val eyebrow = if (active != null) "NOW PLAYING" else "YOUR MUSIC"
@@ -1847,7 +1857,7 @@ private fun MusicHero(
     val subtitle = when {
         active != null -> listOfNotNull(
             active.currentArtist,
-            active.name,
+            activeRoomLabel,
             active.volumeLevel?.let { "$it%" },
         ).joinToString("  ·  ")
         recent != null -> recent.subtitle.ifBlank { "Pick up where you left off" }
@@ -1952,13 +1962,19 @@ private fun MusicHero(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    MusicCircleButton("‹") { onControl(active, MusicPlayerAction.PREVIOUS) }
                     MusicCircleButton(
-                        if (active.playbackState == "playing") "Ⅱ" else "▶",
+                        label = "‹",
+                        enabled = active.canPrevious,
+                    ) { onControl(active, MusicPlayerAction.PREVIOUS) }
+                    MusicCircleButton(
+                        label = if (active.playbackState == "playing") "Ⅱ" else "▶",
                         prominent = true,
                     ) { onControl(active, MusicPlayerAction.PLAY_PAUSE) }
-                    MusicCircleButton("›") { onControl(active, MusicPlayerAction.NEXT) }
-                    DarkButton(active.name) { onOpenPlayer(active) }
+                    MusicCircleButton(
+                        label = "›",
+                        enabled = active.canNext,
+                    ) { onControl(active, MusicPlayerAction.NEXT) }
+                    DarkButton(activeRoomLabel ?: active.name) { onOpenPlayer(active) }
                 }
             } else if (recent != null && recent.playable) {
                 Spacer(Modifier.height(13.dp))
@@ -2104,6 +2120,8 @@ private fun MaPlayerRow(
                         Spacer(Modifier.height(4.dp))
                         BasicText(
                             when {
+                                player.playbackState == "playing" && player.groupMembers.size > 1 ->
+                                    "Playing · ${player.groupMembers.distinct().size} rooms"
                                 player.playbackState == "playing" && !player.currentTitle.isNullOrBlank() ->
                                     "Playing · ${player.currentTitle}"
                                 player.playbackState == "paused" -> "Paused"
@@ -2231,6 +2249,7 @@ private fun MusicRoomPicker(
 private fun MusicCircleButton(
     label: String,
     prominent: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Box(
@@ -2247,13 +2266,17 @@ private fun MusicCircleButton(
                 else Color(0x334D4A75),
                 RoundedCornerShape(19.dp),
             )
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
             label,
             style = TextStyle(
-                color = if (prominent) Color(0xFF101820) else Color.White,
+                color = when {
+                    !enabled -> Color(0xFF555C69)
+                    prominent -> Color(0xFF101820)
+                    else -> Color.White
+                },
                 fontSize = if (label == "Ⅱ") 15.sp else 20.sp,
                 fontWeight = FontWeight.Bold,
             ),
