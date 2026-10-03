@@ -12,6 +12,7 @@ import android.widget.TextView
 import android.widget.Toast
 import android.widget.RadioGroup
 import android.widget.RadioButton
+import android.widget.ScrollView
 import android.widget.LinearLayout
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -894,9 +895,13 @@ class MobileMainActivity : FragmentActivity() {
             setPadding(0, 0, 0, dp(8))
         })
 
+        val settingsScroll = ScrollView(this).apply {
+            addView(container)
+        }
+
         AlertDialog.Builder(this)
             .setTitle("Vesper settings")
-            .setView(container)
+            .setView(settingsScroll)
             .setPositiveButton("Save") { _, _ ->
                 tmdbApiKey = input.text?.toString()?.trim().orEmpty()
                 seerrApiKey = seerrKeyInput.text?.toString()?.trim().orEmpty()
