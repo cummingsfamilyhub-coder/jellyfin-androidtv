@@ -142,8 +142,8 @@ internal class MusicAssistantClient(
         )
     }
 
-    private fun commandArray(command: String, args: JSONObject): List<JSONObject> {
-        val result = command(command, args)
+    private fun commandArray(commandName: String, args: JSONObject): List<JSONObject> {
+        val result = command(commandName, args)
         val array = when (result) {
             is JSONArray -> result
             is JSONObject -> result.optJSONArray("items") ?: JSONArray()
