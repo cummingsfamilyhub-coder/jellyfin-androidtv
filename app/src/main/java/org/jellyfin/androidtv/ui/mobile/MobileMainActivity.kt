@@ -189,6 +189,9 @@ class MobileMainActivity : FragmentActivity() {
         }
 
         loadHome()
+        if (musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank()) {
+            loadMusic()
+        }
     }
 
     private fun loadHome() {
@@ -1368,6 +1371,9 @@ private fun VesperMobile(
                     state = state,
                     popularity = popularity,
                     popularityScope = popularityScope,
+                    musicState = musicState,
+                    musicConfigured = musicConfigured,
+                    onOpenMusic = { openTab(MobileTab.MUSIC) },
                     userName = userName,
                     api = api,
                     onSelect = onSelect,
@@ -1711,7 +1717,9 @@ private fun MusicHub(
                         onControl(player, action)
                     },
                     onManageRooms = {
-                        manageGroupPlayerId = player.syncedTo ?: player.activeGroup ?: player.playerId
+                        val groupTarget = player.syncedTo ?: player.activeGroup ?: player.playerId
+                        selectedPlayerId = null
+                        manageGroupPlayerId = groupTarget
                     },
                 )
             }
@@ -3045,6 +3053,338 @@ private fun PlaceholderTileRow(
 }
 
 @Composable
+private fun HomeMusicRow(
+    state: MusicUiState,
+    configured: Boolean,
+    onOpenMusic: () -> Unit,
+) {
+    Column(Modifier.padding(top = 9.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenMusic)
+                .padding(horizontal = 20.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText(
+                "Continue Listening",
+                style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                modifier = Modifier.weight(1f),
+            )
+            BasicText(
+                "›",
+                style = TextStyle(color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold),
+            )
+        }
+
+        when {
+            !configured -> {
+                PlaceholderTileRowContent(
+                    items = listOf(
+                        "Music" to "Connect Music Assistant",
+                        "Radio" to "Clyde 1 and favourites",
+                        "Rooms" to "Playback around the house",
+                    ),
+                    onClick = onOpenMusic,
+                )
+            }
+
+            state.loading && !state.loaded -> {
+                PlaceholderTileRowContent(
+                    items = listOf(
+                        "Music" to "Loading your library…",
+                        "Radio" to "Loading favourites…",
+                        "Rooms" to "Finding players…",
+                    ),
+                    onClick = onOpenMusic,
+                )
+            }
+
+            state.loaded -> {
+                val snapshot = state.snapshot
+                val active = snapshot.players.firstOrNull {
+                    it.playbackState in setOf("playing", "paused") &&
+                        !it.currentTitle.isNullOrBlank() &&
+                        it.syncedTo == null
+                } ?: snapshot.players.firstOrNull {
+                    it.playbackState in setOf("playing", "paused") &&
+                        !it.currentTitle.isNullOrBlank()
+                }
+
+                val recent = snapshot.recentlyPlayed.take(8)
+
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (active != null) {
+                        item(key = "home-now-playing-${active.playerId}") {
+                            HomeNowPlayingMusicCard(
+                                player = active,
+                                onClick = onOpenMusic,
+                            )
+                        }
+                    }
+
+                    items(recent, key = { "home-music-${it.uri}" }) { item ->
+                        HomeRecentMusicCard(
+                            item = item,
+                            onClick = onOpenMusic,
+                        )
+                    }
+
+                    if (active == null && recent.isEmpty()) {
+                        item {
+                            HomeMusicEmptyCard(onClick = onOpenMusic)
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                HomeMusicEmptyCard(onClick = onOpenMusic)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaceholderTileRowContent(
+    items: List<Pair<String, String>>,
+    onClick: () -> Unit,
+) {
+    LazyRow(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(items) { item ->
+            Row(
+                modifier = Modifier
+                    .width(164.dp)
+                    .height(92.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                Color(0xD51A1C29),
+                                Color(0xC5101721),
+                            )
+                        )
+                    )
+                    .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
+                    .clickable(onClick = onClick)
+                    .padding(13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(Color(0x332F6BFF)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(
+                        item.first.take(1).uppercase(),
+                        style = TextStyle(color = Color(0xFFA98CFF), fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        item.first,
+                        style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    BasicText(
+                        item.second,
+                        style = TextStyle(color = Color(0xFF818A98), fontSize = 10.sp, lineHeight = 13.sp),
+                        maxLines = 2,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeNowPlayingMusicCard(
+    player: MaPlayer,
+    onClick: () -> Unit,
+) {
+    val rooms = if (player.type == "group") {
+        player.groupMembers.distinct().size
+    } else {
+        (player.groupMembers + player.playerId).distinct().size
+    }
+
+    Row(
+        modifier = Modifier
+            .width(220.dp)
+            .height(106.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xD528214C),
+                        Color(0xD5101721),
+                    )
+                )
+            )
+            .border(1.dp, Color(0x555B47D8), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(76.dp)
+                .clip(RoundedCornerShape(15.dp))
+                .background(Color(0xFF111B2C)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!player.currentImageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = player.currentImageUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    "♫",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 28.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(11.dp))
+
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                if (player.playbackState == "playing") "NOW PLAYING" else "PAUSED",
+                style = TextStyle(
+                    color = Color(0xFFA98CFF),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
+                ),
+            )
+            Spacer(Modifier.height(4.dp))
+            BasicText(
+                player.currentTitle ?: "Music",
+                style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                maxLines = 2,
+            )
+            if (!player.currentArtist.isNullOrBlank()) {
+                Spacer(Modifier.height(2.dp))
+                BasicText(
+                    player.currentArtist,
+                    style = TextStyle(color = Color(0xFF9AA3AF), fontSize = 10.sp),
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.height(3.dp))
+            BasicText(
+                if (rooms > 1) "$rooms rooms" else player.name,
+                style = TextStyle(color = Color(0xFF7F8793), fontSize = 9.sp),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeRecentMusicCard(
+    item: MaMediaItem,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(122.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(122.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color(0xFF121A26))
+                .border(1.dp, Color(0x333D4F73), RoundedCornerShape(18.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = item.imageUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    item.name.take(1).uppercase(),
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 30.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+        BasicText(
+            item.name,
+            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+            maxLines = 1,
+        )
+        if (item.subtitle.isNotBlank()) {
+            BasicText(
+                item.subtitle,
+                style = TextStyle(color = Color(0xFF7F8793), fontSize = 9.sp),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeMusicEmptyCard(
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 18.dp)
+            .width(190.dp)
+            .height(92.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xD5151B25))
+            .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0x332F6BFF)),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                "♫",
+                style = TextStyle(color = Color(0xFFA98CFF), fontSize = 20.sp, fontWeight = FontWeight.Bold),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column {
+            BasicText(
+                "Music",
+                style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+            )
+            Spacer(Modifier.height(3.dp))
+            BasicText(
+                "Open Vesper Music",
+                style = TextStyle(color = Color(0xFF818A98), fontSize = 10.sp),
+            )
+        }
+    }
+}
+
+@Composable
 private fun BookModeStrip() {
     Row(
         modifier = Modifier
@@ -3092,6 +3432,9 @@ private fun MobileHome(
     state: MobileHomeState,
     popularity: PopularityState,
     popularityScope: PopularityScope,
+    musicState: MusicUiState,
+    musicConfigured: Boolean,
+    onOpenMusic: () -> Unit,
     userName: String,
     api: ApiClient,
     onSelect: (BaseItemDto) -> Unit,
@@ -3157,13 +3500,10 @@ private fun MobileHome(
             }
 
             item {
-                PlaceholderTileRow(
-                    title = "Continue Listening",
-                    items = listOf(
-                        "Music Assistant" to "Recently played will appear here",
-                        "Radio" to "Clyde 1 and favourites",
-                        "Rooms" to "Pick up playback around the house",
-                    ),
+                HomeMusicRow(
+                    state = musicState,
+                    configured = musicConfigured,
+                    onOpenMusic = onOpenMusic,
                 )
             }
 
