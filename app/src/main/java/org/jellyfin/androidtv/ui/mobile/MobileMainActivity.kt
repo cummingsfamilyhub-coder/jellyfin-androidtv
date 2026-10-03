@@ -1475,8 +1475,8 @@ private fun VesperMobile(
                 VesperMiniPlayer(
                     player = player,
                     onOpen = { showNowPlaying = true },
-                    onPlayPause = {
-                        onControlMusic(player, MusicPlayerAction.PLAY_PAUSE)
+                    onControl = { action ->
+                        onControlMusic(player, action)
                     },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1521,7 +1521,7 @@ private fun VesperMobile(
 private fun VesperMiniPlayer(
     player: MaPlayer,
     onOpen: () -> Unit,
-    onPlayPause: () -> Unit,
+    onControl: (MusicPlayerAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -1575,22 +1575,39 @@ private fun VesperMiniPlayer(
             )
         }
 
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(21.dp))
-                .background(Color(0xFFEAF4FB))
-                .clickable(onClick = onPlayPause),
-            contentAlignment = Alignment.Center,
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            BasicText(
-                if (player.playbackState == "playing") "Ⅱ" else "▶",
-                style = TextStyle(
-                    color = Color(0xFF101820),
-                    fontSize = if (player.playbackState == "playing") 15.sp else 19.sp,
-                    fontWeight = FontWeight.Bold,
-                ),
-            )
+            MusicCircleButton(
+                label = "‹",
+                enabled = player.canPrevious,
+                compact = true,
+            ) { onControl(MusicPlayerAction.PREVIOUS) }
+
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(21.dp))
+                    .background(Color(0xFFEAF4FB))
+                    .clickable { onControl(MusicPlayerAction.PLAY_PAUSE) },
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    if (player.playbackState == "playing") "Ⅱ" else "▶",
+                    style = TextStyle(
+                        color = Color(0xFF101820),
+                        fontSize = if (player.playbackState == "playing") 15.sp else 19.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+            }
+
+            MusicCircleButton(
+                label = "›",
+                enabled = player.canNext,
+                compact = true,
+            ) { onControl(MusicPlayerAction.NEXT) }
         }
     }
 }
@@ -1607,12 +1624,21 @@ private fun VesperNowPlaying(
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true),
     ) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xFF06090E))
-                .padding(horizontal = 24.dp, vertical = 22.dp),
+                .padding(horizontal = 24.dp, vertical = 18.dp),
         ) {
+            val compactHeight = maxHeight < 760.dp
+            val artworkSize = minOf(
+                maxWidth * if (compactHeight) 0.66f else 0.78f,
+                maxHeight * if (compactHeight) 0.34f else 0.40f,
+                360.dp,
+            )
+            val largeGap = if (compactHeight) 12.dp else 18.dp
+            val smallGap = if (compactHeight) 6.dp else 8.dp
+
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -1648,12 +1674,11 @@ private fun VesperNowPlaying(
                     Spacer(Modifier.width(42.dp))
                 }
 
-                Spacer(Modifier.height(26.dp))
+                Spacer(Modifier.height(largeGap))
 
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
+                        .size(artworkSize)
                         .clip(RoundedCornerShape(30.dp))
                         .background(
                             Brush.linearGradient(
@@ -1680,7 +1705,7 @@ private fun VesperNowPlaying(
                     }
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(largeGap))
 
                 BasicText(
                     player.currentTitle ?: "Nothing playing",
@@ -1694,7 +1719,7 @@ private fun VesperNowPlaying(
                 )
 
                 if (!player.currentArtist.isNullOrBlank()) {
-                    Spacer(Modifier.height(7.dp))
+                    Spacer(Modifier.height(smallGap))
                     BasicText(
                         player.currentArtist,
                         style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 15.sp),
@@ -1702,7 +1727,7 @@ private fun VesperNowPlaying(
                     )
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(largeGap))
 
                 val queueSummary = when {
                     player.currentMediaType in setOf("radio", "audio_source") -> "Live"
@@ -1740,7 +1765,7 @@ private fun VesperNowPlaying(
                     }
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(largeGap))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1780,7 +1805,7 @@ private fun VesperNowPlaying(
                     ) { onControl(MusicPlayerAction.NEXT) }
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(largeGap))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2441,10 +2466,15 @@ private fun MaMediaRow(
                     Spacer(Modifier.height(7.dp))
                     BasicText(
                         item.name,
-                        style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                        maxLines = 1,
+                        style = TextStyle(
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            lineHeight = 15.sp,
+                        ),
+                        maxLines = 2,
                     )
-                    if (item.subtitle.isNotBlank()) {
+                    if (item.mediaType != "playlist" && item.subtitle.isNotBlank()) {
                         BasicText(
                             item.subtitle,
                             style = TextStyle(color = Color(0xFF7F8793), fontSize = 10.sp),
@@ -2461,40 +2491,90 @@ private fun MaMediaRow(
 private fun VesperPlaylistArtwork(
     name: String,
 ) {
+    val lower = name.lowercase()
+    val (glyph, label, colors) = when {
+        "favour" in lower || "favor" in lower -> Triple(
+            "♥",
+            "FAVOURITES",
+            listOf(Color(0xFF4B2468), Color(0xFF7D315D), Color(0xFF17172A)),
+        )
+        "recently added" in lower -> Triple(
+            "+",
+            "RECENTLY ADDED",
+            listOf(Color(0xFF123D49), Color(0xFF245B68), Color(0xFF11182A)),
+        )
+        "recently played" in lower -> Triple(
+            "↺",
+            "RECENTLY PLAYED",
+            listOf(Color(0xFF553522), Color(0xFF593A69), Color(0xFF17162A)),
+        )
+        "infinite" in lower -> Triple(
+            "∞",
+            "INFINITE MIX",
+            listOf(Color(0xFF402759), Color(0xFF273E70), Color(0xFF101728)),
+        )
+        "random artist" in lower -> Triple(
+            "✦",
+            "RANDOM ARTIST",
+            listOf(Color(0xFF30245E), Color(0xFF24506A), Color(0xFF101726)),
+        )
+        "random" in lower -> Triple(
+            "✦",
+            "RANDOM MIX",
+            listOf(Color(0xFF30245E), Color(0xFF3A3973), Color(0xFF101726)),
+        )
+        else -> Triple(
+            "♫",
+            "PLAYLIST",
+            listOf(Color(0xFF35265C), Color(0xFF223A5A), Color(0xFF101726)),
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        Color(0xFF28204C),
-                        Color(0xFF18294A),
-                        Color(0xFF0E1828),
-                    )
-                )
-            ),
-        contentAlignment = Alignment.Center,
+            .background(Brush.linearGradient(colors)),
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+                .size(28.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0x22FFFFFF)),
+            contentAlignment = Alignment.Center,
         ) {
             BasicText(
-                "≡♫",
+                "V",
                 style = TextStyle(
-                    color = Color(0xFFB39AFF),
-                    fontSize = 34.sp,
+                    color = Color(0xFFD8CCFF),
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
                 ),
             )
-            Spacer(Modifier.height(7.dp))
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(15.dp),
+        ) {
             BasicText(
-                name.take(18),
+                glyph,
                 style = TextStyle(
-                    color = Color(0xFFD8D2F3),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    fontSize = 38.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+            Spacer(Modifier.height(5.dp))
+            BasicText(
+                label,
+                style = TextStyle(
+                    color = Color(0xFFCEC7E5),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
                 ),
                 maxLines = 1,
             )
@@ -2824,12 +2904,16 @@ private fun MusicCircleButton(
     label: String,
     prominent: Boolean = false,
     enabled: Boolean = true,
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val buttonSize = if (compact) 30.dp else 38.dp
+    val buttonRadius = if (compact) 15.dp else 19.dp
+
     Box(
         modifier = Modifier
-            .size(38.dp)
-            .clip(RoundedCornerShape(19.dp))
+            .size(buttonSize)
+            .clip(RoundedCornerShape(buttonRadius))
             .background(
                 if (prominent) Color(0xFFEAF4FB)
                 else Color(0x44131520)
@@ -2838,7 +2922,7 @@ private fun MusicCircleButton(
                 1.dp,
                 if (prominent) Color(0x33FFFFFF)
                 else Color(0x334D4A75),
-                RoundedCornerShape(19.dp),
+                RoundedCornerShape(buttonRadius),
             )
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -2851,7 +2935,12 @@ private fun MusicCircleButton(
                     prominent -> Color(0xFF101820)
                     else -> Color.White
                 },
-                fontSize = if (label == "Ⅱ") 15.sp else 20.sp,
+                fontSize = when {
+                    compact && label == "Ⅱ" -> 13.sp
+                    compact -> 17.sp
+                    label == "Ⅱ" -> 15.sp
+                    else -> 20.sp
+                },
                 fontWeight = FontWeight.Bold,
             ),
         )
