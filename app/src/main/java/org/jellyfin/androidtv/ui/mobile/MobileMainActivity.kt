@@ -819,11 +819,19 @@ class MobileMainActivity : FragmentActivity() {
     ) {
         if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
 
-        val currentMembers = (player.groupMembers + player.playerId).toSet()
-        val desiredMembers = selectedPlayerIds + player.playerId
+        val currentMembers = if (player.type == "group") {
+            player.groupMembers.toSet()
+        } else {
+            (player.groupMembers + player.playerId).toSet()
+        }
+        val desiredMembers = if (player.type == "group") {
+            selectedPlayerIds
+        } else {
+            selectedPlayerIds + player.playerId
+        }
         val toAdd = (desiredMembers - currentMembers).toList()
         val toRemove = (currentMembers - desiredMembers)
-            .filterNot { it == player.playerId }
+            .filterNot { player.type != "group" && it == player.playerId }
 
         lifecycleScope.launch {
             runCatching {
@@ -1844,7 +1852,10 @@ private fun MusicHero(
         it.playbackState in setOf("playing", "paused") && !it.currentTitle.isNullOrBlank()
     }
     val recent = snapshot.recentlyPlayed.firstOrNull()
-    val activeRoomCount = active?.let { (it.groupMembers + it.playerId).distinct().size } ?: 0
+    val activeRoomCount = active?.let {
+        if (it.type == "group") it.groupMembers.distinct().size
+        else (it.groupMembers + it.playerId).distinct().size
+    } ?: 0
     val activeRoomLabel = when {
         active == null -> null
         activeRoomCount > 1 -> "$activeRoomCount rooms"
@@ -2420,7 +2431,11 @@ private fun MusicPlayerControlPopup(
     onControl: (MusicPlayerAction) -> Unit,
     onManageRooms: () -> Unit,
 ) {
-    val memberIds = (player.groupMembers + player.playerId).distinct()
+    val memberIds = if (player.type == "group") {
+        player.groupMembers.distinct()
+    } else {
+        (player.groupMembers + player.playerId).distinct()
+    }
     val memberNames = memberIds.mapNotNull { memberId ->
         allPlayers.firstOrNull { it.playerId == memberId }?.name
     }.distinct()
@@ -2620,7 +2635,11 @@ private fun MusicGroupManager(
     onSave: (Set<String>) -> Unit,
 ) {
     val roomPlayers = players.filter { it.type != "group" }
-    val initialIds = (player.groupMembers + player.playerId).toSet()
+    val initialIds = if (player.type == "group") {
+        player.groupMembers.toSet()
+    } else {
+        (player.groupMembers + player.playerId).toSet()
+    }
     var selectedIds by remember(player.playerId, player.groupMembers) {
         mutableStateOf(initialIds)
     }
@@ -2677,7 +2696,7 @@ private fun MusicGroupManager(
             LazyColumn(modifier = Modifier.height(400.dp)) {
                 items(roomPlayers, key = { "manage-${it.playerId}" }) { room ->
                     val selected = room.playerId in selectedIds
-                    val isLeader = room.playerId == player.playerId
+                    val isLeader = player.type != "group" && room.playerId == player.playerId
                     val compatible = isLeader ||
                         selected ||
                         musicPlayersCompatible(player, room)
@@ -2685,17 +2704,19 @@ private fun MusicGroupManager(
                     MusicDestinationRow(
                         player = room,
                         selected = selected,
-                        enabled = compatible && !isLeader,
+                        enabled = compatible,
                         trailing = when {
                             isLeader -> "●"
                             selected -> "✓"
                             else -> ""
                         },
                         onClick = {
-                            selectedIds = if (selected) {
-                                selectedIds - room.playerId
-                            } else {
-                                selectedIds + room.playerId
+                            if (!isLeader) {
+                                selectedIds = if (selected) {
+                                    selectedIds - room.playerId
+                                } else {
+                                    selectedIds + room.playerId
+                                }
                             }
                         },
                     )
