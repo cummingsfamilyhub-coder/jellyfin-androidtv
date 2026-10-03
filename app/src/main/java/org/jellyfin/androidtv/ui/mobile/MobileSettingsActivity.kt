@@ -1,6 +1,7 @@
 package org.jellyfin.androidtv.ui.mobile
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -46,11 +47,15 @@ import org.jellyfin.androidtv.VesperServiceConfig
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.ui.preference.PreferencesActivity
+import org.jellyfin.androidtv.util.apiclient.getUrl
+import org.jellyfin.androidtv.util.apiclient.primaryImage
+import org.jellyfin.sdk.api.client.ApiClient
 import org.koin.android.ext.android.inject
 
 class MobileSettingsActivity : FragmentActivity() {
     private val userRepository by inject<UserRepository>()
     private val serverRepository by inject<ServerRepository>()
+    private val api by inject<ApiClient>()
 
     private val preferences by lazy { getSharedPreferences("vesper", MODE_PRIVATE) }
 
@@ -60,10 +65,28 @@ class MobileSettingsActivity : FragmentActivity() {
     private var seerrApiKey by mutableStateOf("")
     private var musicAssistantUrl by mutableStateOf("")
     private var musicAssistantToken by mutableStateOf("")
+    private var pinConfigured by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadPreferences()
+
+        val currentUser = userRepository.currentUser.value
+        val currentServer = serverRepository.currentServer.value
+        val profileImageUrl = currentUser?.primaryImage?.getUrl(api)
+        pinConfigured = if (currentUser != null && currentServer != null) {
+            VesperProfilePinStore.hasPin(this, currentServer.id, currentUser.id)
+        } else {
+            false
+        }
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+        val appVersion = "${packageInfo.versionName ?: "dev"} ($versionCode)"
 
         setContent {
             var page by remember { mutableStateOf(SettingsPage.MAIN) }
@@ -75,8 +98,13 @@ class MobileSettingsActivity : FragmentActivity() {
 
             VesperSettingsScreen(
                 page = page,
-                userName = userRepository.currentUser.value?.name ?: "Vesper",
-                jellyfinName = serverRepository.currentServer.value?.name ?: "Jellyfin",
+                userName = currentUser?.name ?: "Vesper",
+                userAvatarUrl = profileImageUrl,
+                userId = currentUser?.id,
+                serverId = currentServer?.id,
+                pinConfigured = pinConfigured,
+                appVersion = appVersion,
+                jellyfinName = currentServer?.name ?: "Jellyfin",
                 showMiniPlayer = showMiniPlayer,
                 popularityScope = popularityScope,
                 tmdbApiKey = tmdbApiKey,
@@ -129,6 +157,20 @@ class MobileSettingsActivity : FragmentActivity() {
                     markChanged()
                     page = SettingsPage.MAIN
                 },
+                onSetPin = { pin ->
+                    if (currentUser != null && currentServer != null) {
+                        VesperProfilePinStore.setPin(this, currentServer.id, currentUser.id, pin)
+                        pinConfigured = true
+                        markChanged()
+                    }
+                },
+                onRemovePin = {
+                    if (currentUser != null && currentServer != null) {
+                        VesperProfilePinStore.removePin(this, currentServer.id, currentUser.id)
+                        pinConfigured = false
+                        markChanged()
+                    }
+                },
                 onOpenJellyfinSettings = {
                     startActivity(Intent(this, PreferencesActivity::class.java))
                 },
@@ -154,6 +196,7 @@ class MobileSettingsActivity : FragmentActivity() {
 
 private enum class SettingsPage {
     MAIN,
+    PROFILE,
     JELLYFIN,
     MUSIC_ASSISTANT,
     SEERR,
@@ -164,6 +207,11 @@ private enum class SettingsPage {
 private fun VesperSettingsScreen(
     page: SettingsPage,
     userName: String,
+    userAvatarUrl: String?,
+    userId: java.util.UUID?,
+    serverId: java.util.UUID?,
+    pinConfigured: Boolean,
+    appVersion: String,
     jellyfinName: String,
     showMiniPlayer: Boolean,
     popularityScope: String,
@@ -178,6 +226,8 @@ private fun VesperSettingsScreen(
     onSaveMusicAssistant: (String, String) -> Unit,
     onSaveSeerr: (String) -> Unit,
     onSaveTmdb: (String) -> Unit,
+    onSetPin: (String) -> Unit,
+    onRemovePin: () -> Unit,
     onOpenJellyfinSettings: () -> Unit,
 ) {
     Box(
@@ -196,6 +246,8 @@ private fun VesperSettingsScreen(
         when (page) {
             SettingsPage.MAIN -> SettingsHome(
                 userName = userName,
+                userAvatarUrl = userAvatarUrl,
+                appVersion = appVersion,
                 jellyfinName = jellyfinName,
                 showMiniPlayer = showMiniPlayer,
                 popularityScope = popularityScope,
@@ -207,6 +259,15 @@ private fun VesperSettingsScreen(
                 onMiniPlayer = onMiniPlayer,
                 onPopularity = onPopularity,
                 onOpenJellyfinSettings = onOpenJellyfinSettings,
+            )
+
+            SettingsPage.PROFILE -> ProfileSecurityPage(
+                userName = userName,
+                userAvatarUrl = userAvatarUrl,
+                pinConfigured = pinConfigured,
+                onBack = onBack,
+                onSetPin = onSetPin,
+                onRemovePin = onRemovePin,
             )
 
             SettingsPage.JELLYFIN -> JellyfinSettingsPage(
@@ -240,6 +301,8 @@ private fun VesperSettingsScreen(
 @Composable
 private fun SettingsHome(
     userName: String,
+    userAvatarUrl: String?,
+    appVersion: String,
     jellyfinName: String,
     showMiniPlayer: Boolean,
     popularityScope: String,
@@ -262,7 +325,11 @@ private fun SettingsHome(
         }
 
         item {
-            ProfileSettingsCard(userName = userName)
+            ProfileSettingsCard(
+                userName = userName,
+                userAvatarUrl = userAvatarUrl,
+                onClick = { onPage(SettingsPage.PROFILE) },
+            )
         }
 
         item { SettingsSectionLabel("PLAYBACK") }
@@ -355,36 +422,51 @@ private fun SettingsHome(
                 )
             }
         }
+
+        item {
+            SettingsCard {
+                Column(Modifier.padding(16.dp)) {
+                    BasicText(
+                        "Vesper",
+                        style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    BasicText(
+                        "Version $appVersion",
+                        style = TextStyle(color = Color(0xFFAAA2C7), fontSize = 11.sp),
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    BasicText(
+                        "Personal media, one place.",
+                        style = TextStyle(color = Color(0xFF777F8C), fontSize = 11.sp),
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun ProfileSettingsCard(userName: String) {
+private fun ProfileSettingsCard(
+    userName: String,
+    userAvatarUrl: String?,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
             .background(Color(0xD91A1B28))
             .border(1.dp, Color(0x445D4AA8), RoundedCornerShape(24.dp))
+            .clickable(onClick = onClick)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(27.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(Color(0xFF3E2C79), Color(0xFF1B3457))
-                    )
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            BasicText(
-                userName.take(1).uppercase(),
-                style = TextStyle(color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold),
-            )
-        }
+        VesperProfileAvatar(
+            name = userName,
+            imageUrl = userAvatarUrl,
+            modifier = Modifier.size(54.dp),
+        )
 
         Spacer(Modifier.width(14.dp))
 
@@ -401,8 +483,8 @@ private fun ProfileSettingsCard(userName: String) {
         }
 
         BasicText(
-            "Jellyfin profile",
-            style = TextStyle(color = Color(0xFF8C86A8), fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+            "›",
+            style = TextStyle(color = Color(0xFF8C86A8), fontSize = 22.sp),
         )
     }
 }
@@ -459,7 +541,7 @@ private fun SettingsSectionLabel(label: String) {
 private fun SettingsCard(
     content: @Composable () -> Unit,
 ) {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(22.dp))
@@ -645,6 +727,277 @@ private fun SettingsDivider() {
             .height(1.dp)
             .background(Color(0x1FFFFFFF)),
     )
+}
+
+@Composable
+private fun ProfileSecurityPage(
+    userName: String,
+    userAvatarUrl: String?,
+    pinConfigured: Boolean,
+    onBack: () -> Unit,
+    onSetPin: (String) -> Unit,
+    onRemovePin: () -> Unit,
+) {
+    SettingsDetailScaffold(
+        title = "Profile & Security",
+        onBack = onBack,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            VesperProfileAvatar(
+                name = userName,
+                imageUrl = userAvatarUrl,
+                modifier = Modifier.size(88.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            BasicText(
+                userName,
+                style = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+            )
+            Spacer(Modifier.height(5.dp))
+            BasicText(
+                if (userAvatarUrl.isNullOrBlank()) "Using Vesper initials until a Jellyfin profile picture is added."
+                else "Using your Jellyfin profile picture.",
+                style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp),
+            )
+        }
+
+        Spacer(Modifier.height(22.dp))
+
+        PinSettingsCard(
+            pinConfigured = pinConfigured,
+            onSetPin = onSetPin,
+            onRemovePin = onRemovePin,
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        SettingsInfoCard(
+            title = "Jellyfin password",
+            value = "Still your real account credential",
+            helper = "The optional Vesper PIN only unlocks this saved profile on this device. It never replaces your Jellyfin password.",
+        )
+    }
+}
+
+private enum class PinSetupStage {
+    IDLE,
+    NEW,
+    CONFIRM,
+}
+
+@Composable
+private fun PinSettingsCard(
+    pinConfigured: Boolean,
+    onSetPin: (String) -> Unit,
+    onRemovePin: () -> Unit,
+) {
+    var stage by remember { mutableStateOf(PinSetupStage.IDLE) }
+    var firstPin by remember { mutableStateOf("") }
+    var entry by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    SettingsCard {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        "Vesper PIN",
+                        style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    BasicText(
+                        if (pinConfigured) "4-digit PIN enabled on this device"
+                        else "Optional 4-digit local profile lock",
+                        style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp),
+                    )
+                }
+                BasicText(
+                    if (pinConfigured) "On" else "Off",
+                    style = TextStyle(
+                        color = if (pinConfigured) Color(0xFFA8D9C1) else Color(0xFF858E9A),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+            }
+
+            when (stage) {
+                PinSetupStage.IDLE -> {
+                    Spacer(Modifier.height(14.dp))
+                    SettingsPrimaryButton(
+                        label = if (pinConfigured) "Change PIN" else "Set PIN",
+                        onClick = {
+                            firstPin = ""
+                            entry = ""
+                            error = null
+                            stage = PinSetupStage.NEW
+                        },
+                    )
+                    if (pinConfigured) {
+                        Spacer(Modifier.height(9.dp))
+                        SettingsSecondaryButton(
+                            label = "Remove PIN",
+                            onClick = onRemovePin,
+                        )
+                    }
+                }
+
+                PinSetupStage.NEW, PinSetupStage.CONFIRM -> {
+                    Spacer(Modifier.height(16.dp))
+                    BasicText(
+                        if (stage == PinSetupStage.NEW) "Choose a 4-digit PIN"
+                        else "Enter it again to confirm",
+                        style = TextStyle(color = Color(0xFFDDE4EC), fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    PinDots(length = entry.length)
+                    Spacer(Modifier.height(14.dp))
+                    VesperPinPad(
+                        onDigit = { digit ->
+                            if (entry.length < 4) {
+                                val next = entry + digit
+                                entry = next
+                                if (next.length == 4) {
+                                    if (stage == PinSetupStage.NEW) {
+                                        firstPin = next
+                                        entry = ""
+                                        error = null
+                                        stage = PinSetupStage.CONFIRM
+                                    } else if (next == firstPin) {
+                                        onSetPin(next)
+                                        firstPin = ""
+                                        entry = ""
+                                        error = null
+                                        stage = PinSetupStage.IDLE
+                                    } else {
+                                        firstPin = ""
+                                        entry = ""
+                                        error = "Those PINs didn't match. Try again."
+                                        stage = PinSetupStage.NEW
+                                    }
+                                }
+                            }
+                        },
+                        onBackspace = {
+                            if (entry.isNotEmpty()) entry = entry.dropLast(1)
+                        },
+                    )
+                    if (!error.isNullOrBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        BasicText(
+                            error.orEmpty(),
+                            style = TextStyle(color = Color(0xFFFFB7BE), fontSize = 11.sp),
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    SettingsSecondaryButton(
+                        label = "Cancel",
+                        onClick = {
+                            firstPin = ""
+                            entry = ""
+                            error = null
+                            stage = PinSetupStage.IDLE
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PinDots(length: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        repeat(4) { index ->
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 6.dp)
+                    .size(14.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(
+                        if (index < length) Color(0xFF9B83FF)
+                        else Color(0xFF303543)
+                    ),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun VesperPinPad(
+    onDigit: (String) -> Unit,
+    onBackspace: () -> Unit,
+) {
+    val rows = listOf(
+        listOf("1", "2", "3"),
+        listOf("4", "5", "6"),
+        listOf("7", "8", "9"),
+        listOf("", "0", "⌫"),
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                row.forEach { key ->
+                    if (key.isBlank()) {
+                        Spacer(Modifier.weight(1f))
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0xFF11151E))
+                                .clickable {
+                                    if (key == "⌫") onBackspace()
+                                    else onDigit(key)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(
+                                key,
+                                style = TextStyle(
+                                    color = Color.White,
+                                    fontSize = if (key == "⌫") 18.sp else 20.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSecondaryButton(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF242936))
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(color = Color(0xFFD6DCE5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+        )
+    }
 }
 
 @Composable
