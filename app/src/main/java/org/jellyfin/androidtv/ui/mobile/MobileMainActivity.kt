@@ -16,6 +16,7 @@ import android.widget.ScrollView
 import android.widget.LinearLayout
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import org.jellyfin.androidtv.R
@@ -113,6 +114,14 @@ class MobileMainActivity : FragmentActivity() {
     private val serverRepository by inject<ServerRepository>()
     private val userRepository by inject<UserRepository>()
     private val itemMutationRepository by inject<ItemMutationRepository>()
+
+    private val profileSwitchLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            recreate()
+        }
+    }
 
     private var state by mutableStateOf(MobileHomeState())
     private var popularity by mutableStateOf(PopularityState())
@@ -553,12 +562,11 @@ class MobileMainActivity : FragmentActivity() {
 
     private fun switchProfile() {
         val serverId = sessionRepository.currentSession.value?.serverId ?: return
-        sessionRepository.destroyCurrentSession()
-        startActivity(
+        profileSwitchLauncher.launch(
             Intent(this, MobileStartupActivity::class.java)
                 .putExtra(MobileStartupActivity.EXTRA_SWITCH_SERVER_ID, serverId.toString())
+                .putExtra(MobileStartupActivity.EXTRA_PROFILE_SWITCH, true)
         )
-        finish()
     }
 
     private fun isNetworkAvailable(): Boolean {
