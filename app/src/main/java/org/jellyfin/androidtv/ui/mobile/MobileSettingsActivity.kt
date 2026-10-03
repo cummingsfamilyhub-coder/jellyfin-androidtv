@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -401,8 +402,8 @@ private fun ProfileSettingsCard(userName: String) {
         }
 
         BasicText(
-            "PIN & avatar next",
-            style = TextStyle(color = Color(0xFF9C8AE6), fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+            "Jellyfin profile",
+            style = TextStyle(color = Color(0xFF8C86A8), fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
         )
     }
 }
