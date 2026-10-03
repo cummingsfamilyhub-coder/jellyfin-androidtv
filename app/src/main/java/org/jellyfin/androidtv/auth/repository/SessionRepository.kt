@@ -89,16 +89,6 @@ class SessionRepositoryImpl(
 	}
 
 	override suspend fun switchCurrentSession(serverId: UUID, userId: UUID): Boolean {
-		// The requested session is already active. This is a successful outcome,
-		// not an authentication failure.
-		if (
-			currentSession.value?.serverId == serverId &&
-			currentSession.value?.userId == userId
-		) {
-			Timber.d("Requested session is already active")
-			return true
-		}
-
 		_state.value = SessionRepositoryState.SWITCHING_SESSION
 		Timber.i("Switching current session to user $userId")
 
@@ -107,6 +97,14 @@ class SessionRepositoryImpl(
 			Timber.w("Could not switch to non-existing session for user $userId")
 			_state.value = SessionRepositoryState.READY
 			return false
+		}
+
+		// A credentials login can issue a fresh access token for the same user.
+		// Only skip rebinding when the full session (including token) is unchanged.
+		if (currentSession.value == session) {
+			Timber.d("Requested session is already active")
+			_state.value = SessionRepositoryState.READY
+			return true
 		}
 
 		val switched = setCurrentSession(session)
@@ -127,8 +125,9 @@ class SessionRepositoryImpl(
 		var server: Server? = null
 
 		if (session != null) {
-			// No change in session - don't switch
-			if (currentSession.value?.userId == session.userId) return true
+			// Do not treat "same user" as "same session": a fresh login can rotate
+			// the access token and the API client must be rebound to it.
+			if (currentSession.value == session) return true
 
 			// Update last active user
 			authenticationPreferences[AuthenticationPreferences.lastServerId] = session.serverId.toString()
