@@ -17,6 +17,17 @@ internal data class VesperCharacterOption(
 internal class VesperCharacterProvider(
     private val preferences: SharedPreferences,
 ) {
+    fun validateCredentials(
+        apiKey: String,
+        subscriberPin: String?,
+    ) {
+        require(apiKey.isNotBlank()) { "TheTVDB API key is required." }
+        val token = getToken(apiKey, subscriberPin)
+        // A token alone proves login, and a lightweight authenticated request proves
+        // the saved credentials can actually call the v4 API.
+        getJson("/search?query=Toy%20Story&type=movie&limit=1", token)
+    }
+
     fun getCharacters(
         item: BaseItemDto,
         apiKey: String,
@@ -30,7 +41,7 @@ internal class VesperCharacterProvider(
         val endpoint = when (item.type) {
             BaseItemKind.MOVIE -> "/movies/$tvdbId/extended"
             BaseItemKind.SERIES -> "/series/$tvdbId/extended"
-            else -> error("Character artwork currently supports movies and series.")
+            else -> error("Choose an individual movie or series — collections don't have character artwork.")
         }
 
         val response = getJson(endpoint, token)
@@ -81,7 +92,7 @@ internal class VesperCharacterProvider(
         val type = when (item.type) {
             BaseItemKind.MOVIE -> "movie"
             BaseItemKind.SERIES -> "series"
-            else -> error("Character artwork currently supports movies and series.")
+            else -> error("Choose an individual movie or series — collections don't have character artwork.")
         }
 
         fun search(year: Int?): List<JSONObject> {
@@ -187,7 +198,15 @@ internal class VesperCharacterProvider(
             val code = responseCode
             val body = responseBody()
             if (code !in 200..299) {
-                error("TheTVDB sign-in failed with HTTP $code.")
+                val detail = runCatching {
+                    JSONObject(body).optString("message").takeIf { it.isNotBlank() }
+                }.getOrNull()
+                error(
+                    buildString {
+                        append("TheTVDB sign-in failed (HTTP $code)")
+                        if (!detail.isNullOrBlank()) append(": $detail")
+                    }
+                )
             }
 
             JSONObject(body)
@@ -227,7 +246,15 @@ internal class VesperCharacterProvider(
                         .remove(PREF_TOKEN_CREATED_AT)
                         .apply()
                 }
-                error("TheTVDB request failed with HTTP $code.")
+                val detail = runCatching {
+                    JSONObject(body).optString("message").takeIf { it.isNotBlank() }
+                }.getOrNull()
+                error(
+                    buildString {
+                        append("TheTVDB request failed (HTTP $code)")
+                        if (!detail.isNullOrBlank()) append(": $detail")
+                    }
+                )
             }
             JSONObject(body)
         }
