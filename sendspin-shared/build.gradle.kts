@@ -1,42 +1,42 @@
 plugins {
-    kotlin("multiplatform")
-    id("com.android.kotlin.multiplatform.library")
+    id("com.android.library")
+    kotlin("android")
     alias(libs.plugins.kotlin.serialization)
 }
 
-kotlin {
-    androidLibrary {
-        namespace = "com.sendspindroid.shared"
-        compileSdk = 36
+android {
+    namespace = "com.sendspindroid.shared"
+    compileSdk = 36
+
+    defaultConfig {
         minSdk = 26
     }
 
-    applyDefaultHierarchyTemplate()
-
     sourceSets {
-        val jvmShared = create("jvmShared") {
-            dependsOn(commonMain.get())
-            dependencies {
-                implementation("org.bouncycastle:bcprov-jdk18on:1.80")
-            }
-        }
-        androidMain.get().dependsOn(jvmShared)
-
-        commonMain.dependencies {
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
-            implementation("io.ktor:ktor-client-core:3.1.1")
-            implementation("io.ktor:ktor-client-websockets:3.1.1")
-        }
-
-        androidMain.dependencies {
-            implementation("io.ktor:ktor-client-okhttp:3.1.1")
+        getByName("main") {
+            java.srcDirs(
+                "src/commonMain/kotlin",
+                "src/androidMain/kotlin",
+                "src/jvmShared/kotlin",
+            )
         }
     }
+}
 
+kotlin {
     compilerOptions {
-        freeCompilerArgs.add("-Xexpect-actual-classes")
+        freeCompilerArgs.addAll(
+            "-Xmulti-platform",
+            "-Xexpect-actual-classes",
+        )
     }
+}
 
-    jvmToolchain(21)
+dependencies {
+    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    implementation("io.ktor:ktor-client-core:3.1.1")
+    implementation("io.ktor:ktor-client-websockets:3.1.1")
+    implementation("io.ktor:ktor-client-okhttp:3.1.1")
 }
