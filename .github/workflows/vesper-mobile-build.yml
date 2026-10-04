@@ -155,6 +155,20 @@ jobs:
           cp app/build/outputs/apk/debug/*.apk dist/Vesper-mobile-debug.apk
           ls -lh dist/Vesper-mobile-debug.apk
 
+      - name: Re-sign APK with stable Vesper key
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" sign \
+            --ks .github/vesper-debug.keystore \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out dist/Vesper-mobile-debug.signed.apk \
+            dist/Vesper-mobile-debug.apk
+          mv dist/Vesper-mobile-debug.signed.apk dist/Vesper-mobile-debug.apk
+          "$APKSIGNER" verify --verbose --print-certs dist/Vesper-mobile-debug.apk
+
       - name: Verify stable signing key
         run: |
           EXPECTED_KEYSTORE_BLOB="d4aa1eb156060a37eb60466dddd95bf1f9e9a80c"
