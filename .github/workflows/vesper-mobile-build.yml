@@ -194,11 +194,20 @@ jobs:
           test -x "$APKSIGNER"
 
           EXPECTED_CERT="$(
-            keytool -exportcert               -keystore .github/vesper-debug.keystore               -storepass android               -alias androiddebugkey             | sha256sum             | awk '{print $1}'
+            keytool -list -v \
+              -keystore .github/vesper-debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+            | awk -F': ' '/SHA256:/ {print $2; exit}' \
+            | tr -d ':' \
+            | tr '[:upper:]' '[:lower:]'
           )"
 
           ACTUAL_CERT="$(
-            "$APKSIGNER" verify --print-certs dist/Vesper-mobile-debug.apk             | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}'             | tr -d ':'             | tr '[:upper:]' '[:lower:]'
+            "$APKSIGNER" verify --print-certs dist/Vesper-mobile-debug.apk \
+            | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' \
+            | tr -d ':' \
+            | tr '[:upper:]' '[:lower:]'
           )"
 
           echo "Expected signer SHA-256: $EXPECTED_CERT"
