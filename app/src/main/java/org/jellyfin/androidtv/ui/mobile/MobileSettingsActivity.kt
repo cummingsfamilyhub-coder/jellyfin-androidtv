@@ -321,16 +321,36 @@ class MobileSettingsActivity : FragmentActivity() {
             avatarMessage = null
             val suggestions = runCatching {
                 withContext(Dispatchers.IO) {
-                    api.itemsApi.getItems(
-                        fields = ItemRepository.browseFields,
-                        includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
-                        recursive = true,
-                        collapseBoxSetItems = false,
-                        imageTypeLimit = 1,
-                        limit = 500,
-                        sortBy = setOf(ItemSortBy.SORT_NAME),
-                        sortOrder = setOf(SortOrder.ASCENDING),
-                    ).content.items
+                    val allItems = mutableListOf<BaseItemDto>()
+                    var startIndex = 0
+                    var totalRecordCount: Int? = null
+
+                    do {
+                        val page = api.itemsApi.getItems(
+                            fields = ItemRepository.browseFields,
+                            includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                            recursive = true,
+                            collapseBoxSetItems = false,
+                            startIndex = startIndex,
+                            limit = CHARACTER_LIBRARY_PAGE_SIZE,
+                            imageTypeLimit = 1,
+                            sortBy = setOf(ItemSortBy.SORT_NAME),
+                            sortOrder = setOf(SortOrder.ASCENDING),
+                            enableTotalRecordCount = true,
+                        ).content
+
+                        if (totalRecordCount == null) {
+                            totalRecordCount = page.totalRecordCount
+                        }
+
+                        allItems += page.items
+                        startIndex += page.items.size
+                    } while (
+                        page.items.isNotEmpty() &&
+                        startIndex < (totalRecordCount ?: startIndex)
+                    )
+
+                    allItems
                         .filter { item ->
                             (item.type == BaseItemKind.MOVIE || item.type == BaseItemKind.SERIES) &&
                                 item.itemImages[ImageType.PRIMARY] != null
@@ -338,7 +358,7 @@ class MobileSettingsActivity : FragmentActivity() {
                         .distinctBy { it.id }
                 }
             }.getOrElse {
-                avatarMessage = "Couldn't load your Vesper library for character selection."
+                avatarMessage = "Couldn't load your full Vesper library for character selection."
                 emptyList()
             }
             avatarSuggestions = suggestions
@@ -494,6 +514,10 @@ class MobileSettingsActivity : FragmentActivity() {
 
     private fun markChanged() {
         setResult(RESULT_OK)
+    }
+
+    private companion object {
+        const val CHARACTER_LIBRARY_PAGE_SIZE = 250
     }
 }
 
