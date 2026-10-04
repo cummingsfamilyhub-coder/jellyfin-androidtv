@@ -67,7 +67,6 @@ import org.jellyfin.sdk.model.FileInfo
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ImageType
-import org.jellyfin.sdk.model.api.ItemFilter
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.SortOrder
 import org.koin.android.ext.android.inject
@@ -274,37 +273,20 @@ class MobileSettingsActivity : FragmentActivity() {
             avatarMessage = null
             val suggestions = runCatching {
                 withContext(Dispatchers.IO) {
-                    val favourites = api.itemsApi.getItems(
+                    api.itemsApi.getItems(
                         fields = ItemRepository.browseFields,
                         includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
                         recursive = true,
-                        filters = setOf(ItemFilter.IS_FAVORITE),
                         imageTypeLimit = 1,
-                        limit = 12,
+                        limit = 500,
                         sortBy = setOf(ItemSortBy.SORT_NAME),
                         sortOrder = setOf(SortOrder.ASCENDING),
                     ).content.items
-
-                    val popular = api.itemsApi.getItems(
-                        fields = ItemRepository.browseFields,
-                        includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
-                        recursive = true,
-                        imageTypeLimit = 1,
-                        limit = 18,
-                        sortBy = setOf(ItemSortBy.PLAY_COUNT),
-                        sortOrder = setOf(SortOrder.DESCENDING),
-                    ).content.items
-
-                    (favourites + popular)
-                        .filter { item ->
-                            item.itemImages[ImageType.PRIMARY] != null &&
-                                item.providerIds?.keys?.any { it.equals("Tvdb", ignoreCase = true) } == true
-                        }
+                        .filter { it.itemImages[ImageType.PRIMARY] != null }
                         .distinctBy { it.id }
-                        .take(18)
                 }
             }.getOrElse {
-                avatarMessage = "Couldn't load Vesper avatar suggestions."
+                avatarMessage = "Couldn't load your Vesper library for character selection."
                 emptyList()
             }
             avatarSuggestions = suggestions
@@ -1062,6 +1044,18 @@ private fun ProfileSecurityPage(
     onConfigureTvdb: () -> Unit,
     onOpenTvdb: () -> Unit,
 ) {
+    var characterTitleQuery by remember { mutableStateOf("") }
+    val filteredAvatarTitles = remember(avatarSuggestions, characterTitleQuery) {
+        val query = characterTitleQuery.trim()
+        if (query.isBlank()) {
+            avatarSuggestions
+        } else {
+            avatarSuggestions.filter { item ->
+                item.name?.contains(query, ignoreCase = true) == true
+            }
+        }
+    }
+
     SettingsDetailScaffold(
         title = "Profile & Security",
         onBack = onBack,
@@ -1151,25 +1145,42 @@ private fun ProfileSecurityPage(
             }
         } else if (avatarSuggestions.isNotEmpty()) {
             BasicText(
-                "Pick a movie or series, then choose one of its real character images.",
+                "Search your Movies & TV library, then choose one of the title's real character images.",
                 style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp, lineHeight = 16.sp),
             )
             Spacer(Modifier.height(11.dp))
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(horizontal = 2.dp),
-            ) {
-                items(
-                    items = avatarSuggestions,
-                    key = { it.id },
-                ) { item ->
-                    AvatarTitleTile(
-                        item = item,
-                        api = api,
-                        selected = selectedAvatarTitle?.id == item.id,
-                        enabled = !avatarBusy && !characterLoading,
-                        onClick = { onChooseAvatarTitle(item) },
-                    )
+
+            SettingsField(
+                label = "Find a title",
+                value = characterTitleQuery,
+                onValueChange = { characterTitleQuery = it },
+                placeholder = "Toy Story, Frozen, Harry Potter…",
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            if (filteredAvatarTitles.isEmpty()) {
+                BasicText(
+                    "No movies or series matched that search.",
+                    style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp),
+                )
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                ) {
+                    items(
+                        items = filteredAvatarTitles,
+                        key = { it.id },
+                    ) { item ->
+                        AvatarTitleTile(
+                            item = item,
+                            api = api,
+                            selected = selectedAvatarTitle?.id == item.id,
+                            enabled = !avatarBusy && !characterLoading,
+                            onClick = { onChooseAvatarTitle(item) },
+                        )
+                    }
                 }
             }
 
