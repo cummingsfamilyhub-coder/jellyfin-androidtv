@@ -21,27 +21,22 @@ internal data class VesperMusicEndpoint(
             require(!uri.host.isNullOrBlank()) { "Music Assistant URL needs a valid host." }
 
             val remoteReady = scheme == "https"
-            val sendspinUrl = if (remoteReady) {
-                URI(
-                    "wss",
-                    uri.userInfo,
-                    uri.host,
-                    uri.port,
-                    "/sendspin",
-                    null,
-                    null,
-                ).toString()
+            val websocketScheme = if (remoteReady) "wss" else "ws"
+            val basePath = uri.rawPath?.trimEnd('/').orEmpty()
+            val sendspinPath = if (basePath.isBlank() || basePath == "/") {
+                "/sendspin"
             } else {
-                URI(
-                    "ws",
-                    null,
-                    uri.host,
-                    SENDSPIN_LOCAL_PORT,
-                    "/sendspin",
-                    null,
-                    null,
-                ).toString()
+                "$basePath/sendspin"
             }
+            val sendspinUrl = URI(
+                websocketScheme,
+                uri.userInfo,
+                uri.host,
+                uri.port,
+                sendspinPath,
+                null,
+                null,
+            ).toString()
 
             return VesperMusicEndpoint(
                 baseUrl = normalized,
@@ -50,7 +45,5 @@ internal data class VesperMusicEndpoint(
                 remoteReady = remoteReady,
             )
         }
-
-        private const val SENDSPIN_LOCAL_PORT = 8927
     }
 }

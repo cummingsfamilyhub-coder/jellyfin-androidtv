@@ -151,6 +151,14 @@ internal class MusicAssistantClient(
     }
 
 
+    fun approveSendspinPairing(pairingToken: String) {
+        require(pairingToken.isNotBlank()) { "Sendspin pairing token is missing." }
+        command(
+            "sendspin/pair_web_player",
+            JSONObject().put("pairing_token", pairingToken),
+        )
+    }
+
     fun groupAndPlay(item: MaMediaItem, playerIds: List<String>) {
         val selected = playerIds.distinct()
         require(selected.isNotEmpty()) { "Choose at least one room." }
