@@ -79,6 +79,7 @@ import org.jellyfin.androidtv.util.apiclient.itemImages
 import org.jellyfin.androidtv.util.apiclient.itemBackdropImages
 import org.jellyfin.androidtv.util.apiclient.primaryImage
 import org.jellyfin.sdk.api.client.ApiClient
+import org.jellyfin.sdk.api.client.extensions.imageApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.model.api.BaseItemDto
@@ -181,7 +182,14 @@ class MobileMainActivity : FragmentActivity() {
                 tmdbConfigured = tmdbApiKey.isNotBlank(),
                 selected = selected,
                 userName = userRepository.currentUser.value?.name ?: "Vesper",
-                userAvatarUrl = userRepository.currentUser.value?.primaryImage?.getUrl(api),
+                userAvatarUrl = userRepository.currentUser.value?.let { user ->
+                    val revision = vesperPreferences.getLong("profile_avatar_revision_${user.id}", 0L)
+                    if (revision > 0L) {
+                        api.imageApi.getUserImageUrl(userId = user.id, tag = revision.toString())
+                    } else {
+                        user.primaryImage?.getUrl(api)
+                    }
+                },
                 api = api,
                 seerrConfigured = seerrApiKey.isNotBlank(),
                 onLibrarySearch = ::searchLibrary,
