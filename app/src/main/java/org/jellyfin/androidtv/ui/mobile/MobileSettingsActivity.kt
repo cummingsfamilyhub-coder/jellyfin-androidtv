@@ -87,6 +87,9 @@ class MobileSettingsActivity : FragmentActivity() {
     private var tmdbApiKey by mutableStateOf("")
     private var tvdbApiKey by mutableStateOf("")
     private var tvdbSubscriberPin by mutableStateOf("")
+    private var tvdbConnectionVerified by mutableStateOf(false)
+    private var tvdbConnectionMessage by mutableStateOf<String?>(null)
+    private var tvdbConnectionTesting by mutableStateOf(false)
     private var seerrApiKey by mutableStateOf("")
     private var musicAssistantUrl by mutableStateOf("")
     private var musicAssistantToken by mutableStateOf("")
@@ -110,6 +113,7 @@ class MobileSettingsActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadPreferences()
+        tvdbConnectionVerified = preferences.getBoolean("tvdb_connection_verified", false)
 
         val currentUser = userRepository.currentUser.value
         val currentServer = serverRepository.currentServer.value
@@ -165,6 +169,9 @@ class MobileSettingsActivity : FragmentActivity() {
                 tmdbApiKey = tmdbApiKey,
                 tvdbApiKey = tvdbApiKey,
                 tvdbSubscriberPin = tvdbSubscriberPin,
+                tvdbConnectionVerified = tvdbConnectionVerified,
+                tvdbConnectionMessage = tvdbConnectionMessage,
+                tvdbConnectionTesting = tvdbConnectionTesting,
                 seerrApiKey = seerrApiKey,
                 musicAssistantUrl = musicAssistantUrl,
                 musicAssistantToken = musicAssistantToken,
@@ -217,9 +224,12 @@ class MobileSettingsActivity : FragmentActivity() {
                 onSaveTvdb = { key, pin ->
                     tvdbApiKey = key.trim()
                     tvdbSubscriberPin = pin.trim()
+                    tvdbConnectionVerified = false
+                    tvdbConnectionMessage = null
                     preferences.edit()
                         .putString("tvdb_api_key", tvdbApiKey)
                         .putString("tvdb_subscriber_pin", tvdbSubscriberPin)
+                        .putBoolean("tvdb_connection_verified", false)
                         .remove("tvdb_access_token")
                         .remove("tvdb_access_token_created_at")
                         .remove("tvdb_access_token_fingerprint")
@@ -228,7 +238,44 @@ class MobileSettingsActivity : FragmentActivity() {
                     selectedAvatarTitle = null
                     avatarMessage = null
                     markChanged()
-                    page = SettingsPage.MAIN
+                },
+                onTestTvdb = { key, pin ->
+                    tvdbApiKey = key.trim()
+                    tvdbSubscriberPin = pin.trim()
+                    tvdbConnectionTesting = true
+                    tvdbConnectionMessage = null
+
+                    lifecycleScope.launch {
+                        val result = runCatching {
+                            withContext(Dispatchers.IO) {
+                                characterProvider.validateCredentials(
+                                    apiKey = tvdbApiKey,
+                                    subscriberPin = tvdbSubscriberPin.ifBlank { null },
+                                )
+                            }
+                        }
+
+                        tvdbConnectionTesting = false
+                        result.fold(
+                            onSuccess = {
+                                tvdbConnectionVerified = true
+                                tvdbConnectionMessage = "TheTVDB connection is working."
+                                preferences.edit()
+                                    .putString("tvdb_api_key", tvdbApiKey)
+                                    .putString("tvdb_subscriber_pin", tvdbSubscriberPin)
+                                    .putBoolean("tvdb_connection_verified", true)
+                                    .apply()
+                                markChanged()
+                            },
+                            onFailure = { failure ->
+                                tvdbConnectionVerified = false
+                                tvdbConnectionMessage = failure.message ?: "TheTVDB connection failed."
+                                preferences.edit()
+                                    .putBoolean("tvdb_connection_verified", false)
+                                    .apply()
+                            },
+                        )
+                    }
                 },
                 onSetPin = { pin ->
                     if (currentUser != null && currentServer != null) {
@@ -282,7 +329,10 @@ class MobileSettingsActivity : FragmentActivity() {
                         sortBy = setOf(ItemSortBy.SORT_NAME),
                         sortOrder = setOf(SortOrder.ASCENDING),
                     ).content.items
-                        .filter { it.itemImages[ImageType.PRIMARY] != null }
+                        .filter { item ->
+                            (item.type == BaseItemKind.MOVIE || item.type == BaseItemKind.SERIES) &&
+                                item.itemImages[ImageType.PRIMARY] != null
+                        }
                         .distinctBy { it.id }
                 }
             }.getOrElse {
@@ -346,8 +396,8 @@ class MobileSettingsActivity : FragmentActivity() {
                         null
                     }
                 },
-                onFailure = {
-                    avatarMessage = "Couldn't load character artwork. Check the TheTVDB connection."
+                onFailure = { failure ->
+                    avatarMessage = failure.message ?: "Couldn't load character artwork."
                 },
             )
         }
@@ -473,6 +523,9 @@ private fun VesperSettingsScreen(
     tmdbApiKey: String,
     tvdbApiKey: String,
     tvdbSubscriberPin: String,
+    tvdbConnectionVerified: Boolean,
+    tvdbConnectionMessage: String?,
+    tvdbConnectionTesting: Boolean,
     seerrApiKey: String,
     musicAssistantUrl: String,
     musicAssistantToken: String,
@@ -484,6 +537,7 @@ private fun VesperSettingsScreen(
     onSaveSeerr: (String) -> Unit,
     onSaveTmdb: (String) -> Unit,
     onSaveTvdb: (String, String) -> Unit,
+    onTestTvdb: (String, String) -> Unit,
     onSetPin: (String) -> Unit,
     onRemovePin: () -> Unit,
     onPickAvatarPhoto: () -> Unit,
@@ -514,7 +568,8 @@ private fun VesperSettingsScreen(
                 showMiniPlayer = showMiniPlayer,
                 popularityScope = popularityScope,
                 tmdbConfigured = tmdbApiKey.isNotBlank(),
-                tvdbConfigured = tvdbApiKey.isNotBlank(),
+                tvdbConfigured = tvdbApiKey.isNotBlank() && tvdbConnectionVerified,
+                tvdbVerified = tvdbConnectionVerified,
                 seerrConfigured = seerrApiKey.isNotBlank(),
                 musicAssistantConfigured = musicAssistantUrl.isNotBlank() && musicAssistantToken.isNotBlank(),
                 onBack = onBack,
@@ -574,8 +629,12 @@ private fun VesperSettingsScreen(
             SettingsPage.TVDB -> TvdbSettingsPage(
                 initialKey = tvdbApiKey,
                 initialPin = tvdbSubscriberPin,
+                verified = tvdbConnectionVerified,
+                message = tvdbConnectionMessage,
+                testing = tvdbConnectionTesting,
                 onBack = onBack,
                 onSave = onSaveTvdb,
+                onTest = onTestTvdb,
                 onOpenTvdb = onOpenTvdb,
             )
         }
@@ -592,6 +651,7 @@ private fun SettingsHome(
     popularityScope: String,
     tmdbConfigured: Boolean,
     tvdbConfigured: Boolean,
+    tvdbVerified: Boolean,
     seerrConfigured: Boolean,
     musicAssistantConfigured: Boolean,
     onBack: () -> Unit,
@@ -696,7 +756,11 @@ private fun SettingsHome(
                     icon = "C",
                     title = "TheTVDB",
                     subtitle = "Character artwork for Vesper profiles",
-                    status = if (tvdbConfigured) "Configured" else "Needs setup",
+                    status = when {
+                        tvdbVerified -> "Connected"
+                        tvdbConfigured -> "Configured"
+                        else -> "Needs setup"
+                    },
                     onClick = { onPage(SettingsPage.TVDB) },
                 )
             }
@@ -1685,8 +1749,12 @@ private fun TmdbSettingsPage(
 private fun TvdbSettingsPage(
     initialKey: String,
     initialPin: String,
+    verified: Boolean,
+    message: String?,
+    testing: Boolean,
     onBack: () -> Unit,
     onSave: (String, String) -> Unit,
+    onTest: (String, String) -> Unit,
     onOpenTvdb: () -> Unit,
 ) {
     var key by remember(initialKey) { mutableStateOf(initialKey) }
@@ -1728,12 +1796,28 @@ private fun TvdbSettingsPage(
             modifier = Modifier.clickable(onClick = onOpenTvdb),
             style = TextStyle(color = Color(0xFF8F82D3), fontSize = 10.sp),
         )
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(18.dp))
         SettingsPrimaryButton(
-            label = "Save connection",
-            onClick = { onSave(key, pin) },
-            enabled = key.isNotBlank(),
+            label = if (testing) "Testing…" else "Test connection",
+            onClick = { onTest(key, pin) },
+            enabled = key.isNotBlank() && !testing,
         )
+        Spacer(Modifier.height(9.dp))
+        SettingsSecondaryButton(
+            label = "Save credentials",
+            onClick = { onSave(key, pin) },
+        )
+        if (!message.isNullOrBlank()) {
+            Spacer(Modifier.height(10.dp))
+            BasicText(
+                message,
+                style = TextStyle(
+                    color = if (verified) Color(0xFFA8D9C1) else Color(0xFFFFB7BE),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                ),
+            )
+        }
     }
 }
 
