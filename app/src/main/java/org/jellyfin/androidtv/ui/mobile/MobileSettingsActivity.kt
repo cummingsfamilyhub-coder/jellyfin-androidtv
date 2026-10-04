@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Base64
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -418,7 +419,9 @@ class MobileSettingsActivity : FragmentActivity() {
             avatarBusy = false
             avatarMessage = result.fold(
                 onSuccess = { "Using ${character.name} as your profile picture." },
-                onFailure = { "Couldn't use that character artwork as the profile picture." },
+                onFailure = { failure ->
+                    failure.message ?: "Couldn't use that character artwork as the profile picture."
+                },
             )
         }
     }
@@ -429,10 +432,12 @@ class MobileSettingsActivity : FragmentActivity() {
             squareAvatarJpeg(sourceBytes)
         }
 
+        val encodedImage = Base64.encode(jpegBytes, Base64.NO_WRAP)
+
         api.imageApi.postUserImage(
             userId = currentUser.id,
             data = FileInfo(
-                content = jpegBytes,
+                content = encodedImage,
                 mediaType = "image/jpeg",
             ),
         )
