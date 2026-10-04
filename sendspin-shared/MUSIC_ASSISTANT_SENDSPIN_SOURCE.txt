@@ -1,0 +1,9 @@
+Music Assistant Sendspin engine
+
+Vendored from: https://github.com/music-assistant/mobile-app
+Upstream commit: 05858e80abc637e3bf3f20b94125305c325616f5
+Source paths: sendspin/src/commonMain and sendspin/src/androidMain
+Licence: Apache License 2.0 (see MUSIC_ASSISTANT_SENDSPIN_LICENSE.txt)
+
+Vesper keeps this engine isolated inside :sendspin-shared. Platform audio output,
+MediaSession integration, UI and application settings remain Vesper-owned.
