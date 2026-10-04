@@ -325,6 +325,7 @@ class MobileSettingsActivity : FragmentActivity() {
                         fields = ItemRepository.browseFields,
                         includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
                         recursive = true,
+                        collapseBoxSetItems = false,
                         imageTypeLimit = 1,
                         limit = 500,
                         sortBy = setOf(ItemSortBy.SORT_NAME),
