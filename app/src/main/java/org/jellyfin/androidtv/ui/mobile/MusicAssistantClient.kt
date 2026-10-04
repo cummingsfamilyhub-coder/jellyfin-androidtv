@@ -62,6 +62,15 @@ internal class MusicAssistantClient(
 ) {
     private val root = baseUrl.trim().trimEnd('/')
 
+    fun validateConnection() {
+        commandArray(
+            "players/all",
+            JSONObject()
+                .put("return_unavailable", false)
+                .put("return_disabled", false)
+        )
+    }
+
     fun loadSnapshot(): MusicAssistantSnapshot {
         val recent = commandArray(
             "music/recently_played_items",
