@@ -11,7 +11,7 @@ android {
 	compileSdk = libs.versions.android.compileSdk.get().toInt()
 
 	defaultConfig {
-		minSdk = 23
+		minSdk = 26
 		targetSdk = libs.versions.android.targetSdk.get().toInt()
 
 		// Release version
@@ -121,6 +121,9 @@ tasks.register("versionTxt") {
 }
 
 dependencies {
+	// Secure Sendspin player protocol
+	implementation(project(":sendspin-shared"))
+
 	// Jellyfin
 	implementation(projects.playback.core)
 	implementation(projects.playback.jellyfin)
