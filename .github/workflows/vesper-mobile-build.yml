@@ -87,31 +87,44 @@ jobs:
               ''
           )
           text = text.replace(
-              '        <!-- Authentication -->',
-              '        <!-- Mobile authentication -->\n'
+              '        <activity\n'
+              '            android:name=".ui.mobile.MobileStartupActivity"\n'
+              '            android:exported="false"\n'
+              '            android:windowSoftInputMode="adjustResize" />',
               '        <activity\n'
               '            android:name=".ui.mobile.MobileStartupActivity"\n'
               '            android:exported="true"\n'
-              '            android:launchMode="singleTask">\n'
+              '            android:launchMode="singleTask"\n'
+              '            android:windowSoftInputMode="adjustResize">\n'
               '            <intent-filter>\n'
               '                <action android:name="android.intent.action.MAIN" />\n'
               '                <category android:name="android.intent.category.LAUNCHER" />\n'
               '            </intent-filter>\n'
-              '        </activity>\n\n'
-              '        <!-- Authentication -->'
+              '        </activity>'
           )
           text = text.replace(
-              '        <!-- Main application -->',
-              '        <!-- Mobile application -->\n'
               '        <activity\n'
               '            android:name=".ui.mobile.MobileMainActivity"\n'
+              '            android:exported="false"\n'
+              '            android:windowSoftInputMode="adjustResize" />',
+              '        <activity\n'
+              '            android:name=".ui.mobile.MobileMainActivity"\n'
+              '            android:exported="false"\n'
               '            android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden|navigation|uiMode"\n'
-              '            android:launchMode="singleTask" />\n'
+              '            android:launchMode="singleTask"\n'
+              '            android:windowSoftInputMode="adjustResize" />'
+          )
+          text = text.replace(
               '        <activity\n'
               '            android:name=".ui.mobile.MobilePlayerActivity"\n'
+              '            android:exported="false"\n'
+              '            android:windowSoftInputMode="adjustNothing" />',
+              '        <activity\n'
+              '            android:name=".ui.mobile.MobilePlayerActivity"\n'
+              '            android:exported="false"\n'
               '            android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden|navigation|uiMode"\n'
-              '            android:launchMode="singleTask" />\n\n'
-              '        <!-- Main application -->'
+              '            android:launchMode="singleTask"\n'
+              '            android:windowSoftInputMode="adjustNothing" />'
           )
           manifest.write_text(text, encoding="utf-8")
 
