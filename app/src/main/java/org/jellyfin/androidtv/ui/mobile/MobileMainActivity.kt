@@ -1243,6 +1243,10 @@ private fun VesperMobile(
             }
 
             val persistentMusicPlayer = musicState.snapshot.players.firstOrNull {
+                it.name.equals("This Device", ignoreCase = true) &&
+                    it.playbackState in setOf("playing", "paused") &&
+                    !it.currentTitle.isNullOrBlank()
+            } ?: musicState.snapshot.players.firstOrNull {
                 it.playbackState in setOf("playing", "paused") &&
                     !it.currentTitle.isNullOrBlank() &&
                     it.syncedTo == null
@@ -2553,11 +2557,17 @@ private fun MusicRoomPicker(
     onDismiss: () -> Unit,
     onPlay: (List<MaPlayer>) -> Unit,
 ) {
+    val thisDevice = players.firstOrNull {
+        it.type != "group" && it.name.equals("This Device", ignoreCase = true)
+    }
+    val rooms = players.filter {
+        it.type != "group" && it.playerId != thisDevice?.playerId
+    }
     val groups = players.filter { it.type == "group" }
-    val rooms = players.filter { it.type != "group" }
+    val selectableRooms = listOfNotNull(thisDevice) + rooms
     var selectedIds by remember(item.uri) { mutableStateOf(setOf<String>()) }
 
-    val selectedRooms = rooms.filter { it.playerId in selectedIds }
+    val selectedRooms = selectableRooms.filter { it.playerId in selectedIds }
     val primary = selectedRooms.firstOrNull()
 
     Popup(
@@ -2592,7 +2602,7 @@ private fun MusicRoomPicker(
                     )
                     Spacer(Modifier.height(3.dp))
                     BasicText(
-                        "Choose one room or build a temporary group.",
+                        "Choose this device, a room, or build a temporary group.",
                         style = TextStyle(color = Color(0xFF858E9B), fontSize = 10.sp),
                     )
                 }
@@ -2613,10 +2623,10 @@ private fun MusicRoomPicker(
             LazyColumn(
                 modifier = Modifier.height(430.dp),
             ) {
-                if (groups.isNotEmpty()) {
+                thisDevice?.let { localPlayer ->
                     item {
                         BasicText(
-                            "READY-MADE GROUPS",
+                            "THIS DEVICE",
                             style = TextStyle(
                                 color = Color(0xFF777D92),
                                 fontSize = 8.sp,
@@ -2626,14 +2636,24 @@ private fun MusicRoomPicker(
                             modifier = Modifier.padding(start = 10.dp, top = 8.dp, bottom = 5.dp),
                         )
                     }
+                    item(key = "this-device-${localPlayer.playerId}") {
+                        val selected = localPlayer.playerId in selectedIds
+                        val compatible = primary == null ||
+                            selected ||
+                            musicPlayersCompatible(primary, localPlayer)
 
-                    items(groups, key = { "group-${it.playerId}" }) { group ->
                         MusicDestinationRow(
-                            player = group,
-                            selected = false,
-                            enabled = true,
-                            trailing = "›",
-                            onClick = { onPlay(listOf(group)) },
+                            player = localPlayer,
+                            selected = selected,
+                            enabled = compatible,
+                            trailing = if (selected) "✓" else "",
+                            onClick = {
+                                selectedIds = if (selected) {
+                                    selectedIds - localPlayer.playerId
+                                } else {
+                                    selectedIds + localPlayer.playerId
+                                }
+                            },
                         )
                     }
                 }
@@ -2673,15 +2693,40 @@ private fun MusicRoomPicker(
                         )
                     }
                 }
+
+                if (groups.isNotEmpty()) {
+                    item {
+                        BasicText(
+                            "GROUPS",
+                            style = TextStyle(
+                                color = Color(0xFF777D92),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.4.sp,
+                            ),
+                            modifier = Modifier.padding(start = 10.dp, top = 10.dp, bottom = 5.dp),
+                        )
+                    }
+
+                    items(groups, key = { "group-${it.playerId}" }) { group ->
+                        MusicDestinationRow(
+                            player = group,
+                            selected = false,
+                            enabled = true,
+                            trailing = "›",
+                            onClick = { onPlay(listOf(group)) },
+                        )
+                    }
+                }
             }
 
             if (selectedRooms.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 VesperButton(
                     label = if (selectedRooms.size == 1) {
-                        "Play in ${selectedRooms.first().name}"
+                        "Play on ${selectedRooms.first().name}"
                     } else {
-                        "Play on ${selectedRooms.size} rooms"
+                        "Play on ${selectedRooms.size} outputs"
                     },
                     onClick = { onPlay(selectedRooms) },
                 )
