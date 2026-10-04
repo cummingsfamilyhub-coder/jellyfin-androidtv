@@ -12,7 +12,6 @@ include(":playback:media3:exoplayer")
 include(":playback:media3:session")
 include(":preference")
 include(":sendspin-shared")
-include(":ma-sendspin")
 
 pluginManagement {
 	repositories {
