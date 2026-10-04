@@ -56,7 +56,7 @@ jobs:
           )
           text = text.replace(
               '<string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Vesper</string>',
-              '<string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Vesper</string>'
+              '<string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Vesper Recovery</string>'
           )
           strings.write_text(text, encoding="utf-8")
 
