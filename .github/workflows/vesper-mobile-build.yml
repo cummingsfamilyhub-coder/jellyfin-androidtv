@@ -178,9 +178,20 @@ jobs:
         run: |
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
-          EXPECTED_CERT="$(keytool -list -v -keystore .github/vesper-debug.keystore -storepass android -alias androiddebugkey | sed -n 's/.*SHA256: //p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          ACTUAL_CERT="$("$APKSIGNER" verify --print-certs dist/Vesper-mobile-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+
+          EXPECTED_CERT="$(
+            keytool -exportcert               -keystore .github/vesper-debug.keystore               -storepass android               -alias androiddebugkey             | sha256sum             | awk '{print $1}'
+          )"
+
+          ACTUAL_CERT="$(
+            "$APKSIGNER" verify --print-certs dist/Vesper-mobile-debug.apk             | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}'             | tr -d ':'             | tr '[:upper:]' '[:lower:]'
+          )"
+
+          echo "Expected signer SHA-256: $EXPECTED_CERT"
+          echo "Actual signer SHA-256:   $ACTUAL_CERT"
+
           test -n "$EXPECTED_CERT"
+          test -n "$ACTUAL_CERT"
           test "$ACTUAL_CERT" = "$EXPECTED_CERT" || {
             echo "::error::APK signer does not match the stable Vesper signing key. Refusing to publish."
             exit 1
