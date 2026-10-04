@@ -94,6 +94,9 @@ class MobileSettingsActivity : FragmentActivity() {
     private var seerrApiKey by mutableStateOf("")
     private var musicAssistantUrl by mutableStateOf("")
     private var musicAssistantToken by mutableStateOf("")
+    private var musicAssistantConnectionVerified by mutableStateOf(false)
+    private var musicAssistantConnectionMessage by mutableStateOf<String?>(null)
+    private var musicAssistantConnectionTesting by mutableStateOf(false)
     private var pinConfigured by mutableStateOf(false)
     private var profileImageUrl by mutableStateOf<String?>(null)
     private var avatarSuggestions by mutableStateOf<List<BaseItemDto>>(emptyList())
@@ -115,6 +118,8 @@ class MobileSettingsActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         loadPreferences()
         tvdbConnectionVerified = preferences.getBoolean("tvdb_connection_verified", false)
+        musicAssistantConnectionVerified =
+            preferences.getBoolean("music_assistant_connection_verified", false)
 
         val currentUser = userRepository.currentUser.value
         val currentServer = serverRepository.currentServer.value
@@ -176,6 +181,9 @@ class MobileSettingsActivity : FragmentActivity() {
                 seerrApiKey = seerrApiKey,
                 musicAssistantUrl = musicAssistantUrl,
                 musicAssistantToken = musicAssistantToken,
+                musicAssistantConnectionVerified = musicAssistantConnectionVerified,
+                musicAssistantConnectionMessage = musicAssistantConnectionMessage,
+                musicAssistantConnectionTesting = musicAssistantConnectionTesting,
                 onBack = {
                     if (page == SettingsPage.MAIN) finish()
                     else page = SettingsPage.MAIN
@@ -198,12 +206,59 @@ class MobileSettingsActivity : FragmentActivity() {
                 onSaveMusicAssistant = { url, token ->
                     musicAssistantUrl = url.trim().trimEnd('/')
                     musicAssistantToken = token.trim()
+                    musicAssistantConnectionVerified = false
+                    musicAssistantConnectionMessage = null
                     preferences.edit()
                         .putString("music_assistant_url", musicAssistantUrl)
                         .putString("music_assistant_token", musicAssistantToken)
+                        .putBoolean("music_assistant_connection_verified", false)
                         .apply()
                     markChanged()
-                    page = SettingsPage.MAIN
+                },
+                onTestMusicAssistant = { url, token ->
+                    musicAssistantUrl = url.trim().trimEnd('/')
+                    musicAssistantToken = token.trim()
+                    musicAssistantConnectionTesting = true
+                    musicAssistantConnectionMessage = null
+
+                    lifecycleScope.launch {
+                        val result = runCatching {
+                            val endpoint = VesperMusicEndpoint.from(musicAssistantUrl)
+                            withContext(Dispatchers.IO) {
+                                MusicAssistantClient(
+                                    baseUrl = endpoint.baseUrl,
+                                    token = musicAssistantToken,
+                                ).validateConnection()
+                            }
+                            endpoint
+                        }
+
+                        musicAssistantConnectionTesting = false
+                        result.fold(
+                            onSuccess = { endpoint ->
+                                musicAssistantConnectionVerified = true
+                                musicAssistantConnectionMessage = if (endpoint.remoteReady) {
+                                    "Music Assistant API connected over HTTPS."
+                                } else {
+                                    "Music Assistant API connected. This address is local-only."
+                                }
+                                preferences.edit()
+                                    .putString("music_assistant_url", endpoint.baseUrl)
+                                    .putString("music_assistant_token", musicAssistantToken)
+                                    .putBoolean("music_assistant_connection_verified", true)
+                                    .apply()
+                                markChanged()
+                            },
+                            onFailure = { failure ->
+                                musicAssistantConnectionVerified = false
+                                musicAssistantConnectionMessage =
+                                    failure.message ?: "Music Assistant connection failed."
+                                preferences.edit()
+                                    .putBoolean("music_assistant_connection_verified", false)
+                                    .apply()
+                            },
+                        )
+                    }
                 },
                 onSaveSeerr = { key ->
                     seerrApiKey = key.trim()
@@ -559,11 +614,15 @@ private fun VesperSettingsScreen(
     seerrApiKey: String,
     musicAssistantUrl: String,
     musicAssistantToken: String,
+    musicAssistantConnectionVerified: Boolean,
+    musicAssistantConnectionMessage: String?,
+    musicAssistantConnectionTesting: Boolean,
     onBack: () -> Unit,
     onPage: (SettingsPage) -> Unit,
     onMiniPlayer: (Boolean) -> Unit,
     onPopularity: (String) -> Unit,
     onSaveMusicAssistant: (String, String) -> Unit,
+    onTestMusicAssistant: (String, String) -> Unit,
     onSaveSeerr: (String) -> Unit,
     onSaveTmdb: (String) -> Unit,
     onSaveTvdb: (String, String) -> Unit,
@@ -602,6 +661,10 @@ private fun VesperSettingsScreen(
                 tvdbVerified = tvdbConnectionVerified,
                 seerrConfigured = seerrApiKey.isNotBlank(),
                 musicAssistantConfigured = musicAssistantUrl.isNotBlank() && musicAssistantToken.isNotBlank(),
+                musicAssistantVerified = musicAssistantConnectionVerified,
+                musicAssistantRemoteReady = runCatching {
+                    VesperMusicEndpoint.from(musicAssistantUrl).remoteReady
+                }.getOrDefault(false),
                 onBack = onBack,
                 onPage = onPage,
                 onMiniPlayer = onMiniPlayer,
@@ -640,8 +703,12 @@ private fun VesperSettingsScreen(
             SettingsPage.MUSIC_ASSISTANT -> MusicAssistantSettingsPage(
                 initialUrl = musicAssistantUrl,
                 initialToken = musicAssistantToken,
+                verified = musicAssistantConnectionVerified,
+                message = musicAssistantConnectionMessage,
+                testing = musicAssistantConnectionTesting,
                 onBack = onBack,
                 onSave = onSaveMusicAssistant,
+                onTest = onTestMusicAssistant,
             )
 
             SettingsPage.SEERR -> SeerrSettingsPage(
@@ -684,6 +751,8 @@ private fun SettingsHome(
     tvdbVerified: Boolean,
     seerrConfigured: Boolean,
     musicAssistantConfigured: Boolean,
+    musicAssistantVerified: Boolean,
+    musicAssistantRemoteReady: Boolean,
     onBack: () -> Unit,
     onPage: (SettingsPage) -> Unit,
     onMiniPlayer: (Boolean) -> Unit,
@@ -762,7 +831,12 @@ private fun SettingsHome(
                     icon = "♫",
                     title = "Music Assistant",
                     subtitle = "Music library, rooms and playback",
-                    status = if (musicAssistantConfigured) "Connected" else "Needs setup",
+                    status = when {
+                        musicAssistantVerified && musicAssistantRemoteReady -> "HTTPS ready"
+                        musicAssistantVerified -> "Local only"
+                        musicAssistantConfigured -> "Configured"
+                        else -> "Needs setup"
+                    },
                     onClick = { onPage(SettingsPage.MUSIC_ASSISTANT) },
                 )
                 SettingsDivider()
@@ -1670,21 +1744,38 @@ private fun JellyfinSettingsPage(
 private fun MusicAssistantSettingsPage(
     initialUrl: String,
     initialToken: String,
+    verified: Boolean,
+    message: String?,
+    testing: Boolean,
     onBack: () -> Unit,
     onSave: (String, String) -> Unit,
+    onTest: (String, String) -> Unit,
 ) {
     var url by remember(initialUrl) { mutableStateOf(initialUrl) }
     var token by remember(initialToken) { mutableStateOf(initialToken) }
+    val endpoint = remember(url) {
+        runCatching { VesperMusicEndpoint.from(url) }.getOrNull()
+    }
 
     SettingsDetailScaffold(
         title = "Music Assistant",
         onBack = onBack,
     ) {
+        SettingsInfoCard(
+            title = if (endpoint?.remoteReady == true) "Canonical HTTPS endpoint" else "Local Music Assistant endpoint",
+            value = endpoint?.baseUrl ?: url.ifBlank { "Not configured" },
+            helper = if (endpoint?.remoteReady == true) {
+                "Vesper will use this same secure host for the MA API and This Device playback."
+            } else {
+                "This address only works on your home network. Use an HTTPS endpoint for Music Anywhere."
+            },
+        )
+        Spacer(Modifier.height(16.dp))
         SettingsField(
             label = "Server URL",
             value = url,
             onValueChange = { url = it },
-            placeholder = "http://192.168.1.34:8095",
+            placeholder = "https://music.example.com",
         )
         Spacer(Modifier.height(14.dp))
         SettingsField(
@@ -1694,17 +1785,42 @@ private fun MusicAssistantSettingsPage(
             placeholder = "Music Assistant token",
             password = true,
         )
-        Spacer(Modifier.height(8.dp))
-        BasicText(
-            "Used for your music library, room control and playback.",
-            style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp, lineHeight = 16.sp),
-        )
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
+
+        if (endpoint != null) {
+            SettingsInfoCard(
+                title = "This Device transport",
+                value = endpoint.sendspinUrl,
+                helper = if (endpoint.remoteReady) {
+                    "Secure WebSocket endpoint derived automatically from the canonical HTTPS address."
+                } else {
+                    "Local Sendspin uses Music Assistant's player port. Remote playback still needs HTTPS."
+                },
+            )
+            Spacer(Modifier.height(14.dp))
+        }
+
         SettingsPrimaryButton(
-            label = "Save connection",
-            onClick = { onSave(url, token) },
-            enabled = url.isNotBlank() && token.isNotBlank(),
+            label = if (testing) "Testing…" else "Test connection",
+            onClick = { onTest(url, token) },
+            enabled = url.isNotBlank() && token.isNotBlank() && !testing,
         )
+        Spacer(Modifier.height(9.dp))
+        SettingsSecondaryButton(
+            label = "Save credentials",
+            onClick = { onSave(url, token) },
+        )
+        if (!message.isNullOrBlank()) {
+            Spacer(Modifier.height(10.dp))
+            BasicText(
+                message,
+                style = TextStyle(
+                    color = if (verified) Color(0xFFA8D9C1) else Color(0xFFFFB7BE),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                ),
+            )
+        }
     }
 }
 
