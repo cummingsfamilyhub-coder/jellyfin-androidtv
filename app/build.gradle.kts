@@ -125,8 +125,11 @@ tasks.register("versionTxt") {
 }
 
 dependencies {
-	// Secure Sendspin player protocol
+	// Secure Sendspin protocol groundwork retained from the earlier spike
 	implementation(project(":sendspin-shared"))
+
+	// Official Music Assistant Sendspin player engine (pinned upstream source)
+	implementation(project(":ma-sendspin"))
 
 	// Jellyfin
 	implementation(projects.playback.core)
