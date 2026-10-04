@@ -202,6 +202,14 @@ internal class MusicAssistantClient(
         )
     }
 
+    fun resume(playerId: String) {
+        command("players/cmd/play", JSONObject().put("player_id", playerId))
+    }
+
+    fun pause(playerId: String) {
+        command("players/cmd/pause", JSONObject().put("player_id", playerId))
+    }
+
     fun playPause(playerId: String) {
         command("players/cmd/play_pause", JSONObject().put("player_id", playerId))
     }

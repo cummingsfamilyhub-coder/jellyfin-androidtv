@@ -134,7 +134,6 @@ class MobileMainActivity : FragmentActivity() {
     private var musicAssistantToken by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
     private var showPersistentMiniPlayer by mutableStateOf(true)
-    private var sendspinRuntime: VesperSendspinRuntime? = null
     private val hydratedTabs = mutableSetOf<MobileTab>()
     private val loadingTabs = mutableSetOf<MobileTab>()
 
@@ -211,25 +210,22 @@ class MobileMainActivity : FragmentActivity() {
             )
         }
 
+        lifecycleScope.launch {
+            VesperMusicPlaybackService.playerRefreshEvents.collect {
+                loadMusic()
+            }
+        }
+
         loadHome()
         if (musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank()) {
-            sendspinRuntime = runCatching {
-                VesperSendspinRuntime(
-                    context = this,
-                    musicAssistantBaseUrl = musicAssistantBaseUrl,
-                    token = musicAssistantToken,
-                    scope = lifecycleScope,
-                    onPlayerRefresh = ::loadMusic,
-                )
-            }.getOrNull()
+            startForegroundService(
+                Intent(this, VesperMusicPlaybackService::class.java)
+                    .setAction(VesperMusicPlaybackService.ACTION_CONFIGURE)
+            )
             loadMusic()
+        } else {
+            stopService(Intent(this, VesperMusicPlaybackService::class.java))
         }
-    }
-
-    override fun onDestroy() {
-        sendspinRuntime?.close()
-        sendspinRuntime = null
-        super.onDestroy()
     }
 
     private fun loadHome() {

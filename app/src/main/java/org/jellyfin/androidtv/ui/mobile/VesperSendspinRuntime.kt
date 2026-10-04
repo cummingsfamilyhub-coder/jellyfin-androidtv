@@ -12,6 +12,7 @@ import java.io.Closeable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -65,6 +66,7 @@ internal class VesperSendspinRuntime(
     )
 
     val state: StateFlow<PlayerState> = engine.player.state
+    val events: Flow<PlayerEvent> = engine.player.events
 
     init {
         scope.launch {
