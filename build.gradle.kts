@@ -42,12 +42,15 @@ subprojects {
 		}
 	}
 
-	// Configure default Android options
-	plugins.withType<com.android.build.gradle.BasePlugin> {
-		configure<com.android.build.gradle.BaseExtension> {
-			compileOptions {
-				sourceCompatibility = JavaVersion.VERSION_1_8
-				targetCompatibility = JavaVersion.VERSION_1_8
+	// Configure legacy Android modules. The secure Sendspin module uses the
+	// Android-KMP library plugin, which intentionally does not expose BaseExtension.
+	if (name != "sendspin-shared") {
+		plugins.withType<com.android.build.gradle.BasePlugin> {
+			configure<com.android.build.gradle.BaseExtension> {
+				compileOptions {
+					sourceCompatibility = JavaVersion.VERSION_1_8
+					targetCompatibility = JavaVersion.VERSION_1_8
+				}
 			}
 		}
 	}
