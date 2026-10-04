@@ -3,6 +3,7 @@ package org.jellyfin.androidtv.ui.mobile
 import android.content.SharedPreferences
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.json.JSONObject
@@ -23,12 +24,8 @@ internal class VesperCharacterProvider(
     ): List<VesperCharacterOption> {
         require(apiKey.isNotBlank()) { "TheTVDB API key is required." }
 
-        val tvdbId = item.providerIds
-            ?.entries
-            ?.firstOrNull { (key, _) -> key.equals("Tvdb", ignoreCase = true) }
-            ?.value
-            ?.toLongOrNull()
-            ?: error("This item does not have a TheTVDB ID in Jellyfin.")
+        val token = getToken(apiKey, subscriberPin)
+        val tvdbId = resolveTvdbId(item, token)
 
         val endpoint = when (item.type) {
             BaseItemKind.MOVIE -> "/movies/$tvdbId/extended"
@@ -36,7 +33,6 @@ internal class VesperCharacterProvider(
             else -> error("Character artwork currently supports movies and series.")
         }
 
-        val token = getToken(apiKey, subscriberPin)
         val response = getJson(endpoint, token)
         val characters = response
             .optJSONObject("data")
@@ -69,6 +65,72 @@ internal class VesperCharacterProvider(
             .distinctBy { it.name.lowercase() to it.imageUrl }
             .take(MAX_CHARACTERS)
     }
+
+    private fun resolveTvdbId(item: BaseItemDto, token: String): Long {
+        val storedId = item.providerIds
+            ?.entries
+            ?.firstOrNull { (key, _) -> key.equals("Tvdb", ignoreCase = true) }
+            ?.value
+            ?.toLongOrNull()
+
+        if (storedId != null) return storedId
+
+        val title = item.name?.trim().orEmpty()
+        if (title.isBlank()) error("This Jellyfin item has no title to match.")
+
+        val type = when (item.type) {
+            BaseItemKind.MOVIE -> "movie"
+            BaseItemKind.SERIES -> "series"
+            else -> error("Character artwork currently supports movies and series.")
+        }
+
+        fun search(year: Int?): List<JSONObject> {
+            val encodedTitle = URLEncoder.encode(title, Charsets.UTF_8.name())
+            val yearPart = year?.let { "&year=$it" }.orEmpty()
+            val response = getJson(
+                "/search?query=$encodedTitle&type=$type$yearPart&limit=10",
+                token,
+            )
+            val data = response.optJSONArray("data") ?: return emptyList()
+            return buildList {
+                for (index in 0 until data.length()) {
+                    data.optJSONObject(index)?.let(::add)
+                }
+            }
+        }
+
+        val candidates = search(item.productionYear).ifEmpty {
+            search(null)
+        }
+
+        if (candidates.isEmpty()) {
+            error("TheTVDB could not match $title.")
+        }
+
+        val normalizedTitle = normalizeTitle(title)
+        val best = candidates
+            .sortedWith(
+                compareByDescending<JSONObject> { candidate ->
+                    val candidateName = candidate.optString("name").ifBlank {
+                        candidate.optString("title")
+                    }
+                    normalizeTitle(candidateName) == normalizedTitle
+                }.thenByDescending { candidate ->
+                    val candidateYear = candidate.optString("year").toIntOrNull()
+                    item.productionYear != null && candidateYear == item.productionYear
+                }
+            )
+            .first()
+
+        return best.optString("tvdb_id")
+            .ifBlank { best.optString("id") }
+            .toLongOrNull()
+            ?: error("TheTVDB returned a match without an ID.")
+    }
+
+    private fun normalizeTitle(value: String): String =
+        value.lowercase()
+            .filter { it.isLetterOrDigit() }
 
     fun downloadImage(url: String): ByteArray {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
