@@ -187,6 +187,27 @@ jobs:
             exit 1
           }
 
+      - name: Verify settings continuity
+        run: |
+          SETTINGS_FILE="app/src/main/java/org/jellyfin/androidtv/ui/mobile/MobileSettingsActivity.kt"
+          grep -Fq 'getSharedPreferences("vesper", MODE_PRIVATE)' "$SETTINGS_FILE" || {
+            echo "::error::Vesper preferences store changed. Add an explicit migration before publishing."
+            exit 1
+          }
+          for KEY in \
+            music_assistant_url \
+            music_assistant_token \
+            seerr_api_key \
+            tmdb_api_key \
+            tvdb_api_key \
+            tvdb_subscriber_pin
+          do
+            grep -Fq "\"$KEY\"" "$SETTINGS_FILE" || {
+              echo "::error::Stored setting '$KEY' changed or disappeared. Add an explicit migration before publishing."
+              exit 1
+            }
+          done
+
       - name: Upload Vesper Mobile APK
         uses: actions/upload-artifact@v4
         with:
