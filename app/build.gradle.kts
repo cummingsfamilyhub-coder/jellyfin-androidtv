@@ -7,6 +7,10 @@ plugins {
 }
 
 android {
+	packaging {
+		resources.excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+	}
+
 	namespace = "org.jellyfin.androidtv"
 	compileSdk = libs.versions.android.compileSdk.get().toInt()
 
