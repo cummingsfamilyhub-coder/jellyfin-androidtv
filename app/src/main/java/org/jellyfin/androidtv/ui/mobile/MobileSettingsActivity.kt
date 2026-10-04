@@ -69,7 +69,6 @@ import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.ItemFilter
 import org.jellyfin.sdk.model.api.ItemSortBy
-import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.SortOrder
 import org.koin.android.ext.android.inject
 import java.io.ByteArrayOutputStream
@@ -87,14 +86,21 @@ class MobileSettingsActivity : FragmentActivity() {
     private var showMiniPlayer by mutableStateOf(true)
     private var popularityScope by mutableStateOf("GLOBAL")
     private var tmdbApiKey by mutableStateOf("")
+    private var tvdbApiKey by mutableStateOf("")
+    private var tvdbSubscriberPin by mutableStateOf("")
     private var seerrApiKey by mutableStateOf("")
     private var musicAssistantUrl by mutableStateOf("")
     private var musicAssistantToken by mutableStateOf("")
     private var pinConfigured by mutableStateOf(false)
     private var profileImageUrl by mutableStateOf<String?>(null)
     private var avatarSuggestions by mutableStateOf<List<BaseItemDto>>(emptyList())
+    private var selectedAvatarTitle by mutableStateOf<BaseItemDto?>(null)
+    private var characterSuggestions by mutableStateOf<List<VesperCharacterOption>>(emptyList())
+    private var characterLoading by mutableStateOf(false)
     private var avatarBusy by mutableStateOf(false)
     private var avatarMessage by mutableStateOf<String?>(null)
+
+    private val characterProvider by lazy { VesperCharacterProvider(preferences) }
 
     private val avatarPhotoPicker = registerForActivityResult(
         ActivityResultContracts.GetContent(),
@@ -147,6 +153,9 @@ class MobileSettingsActivity : FragmentActivity() {
                 serverId = currentServer?.id,
                 pinConfigured = pinConfigured,
                 avatarSuggestions = avatarSuggestions,
+                selectedAvatarTitle = selectedAvatarTitle,
+                characterSuggestions = characterSuggestions,
+                characterLoading = characterLoading,
                 avatarBusy = avatarBusy,
                 avatarMessage = avatarMessage,
                 api = api,
@@ -155,6 +164,8 @@ class MobileSettingsActivity : FragmentActivity() {
                 showMiniPlayer = showMiniPlayer,
                 popularityScope = popularityScope,
                 tmdbApiKey = tmdbApiKey,
+                tvdbApiKey = tvdbApiKey,
+                tvdbSubscriberPin = tvdbSubscriberPin,
                 seerrApiKey = seerrApiKey,
                 musicAssistantUrl = musicAssistantUrl,
                 musicAssistantToken = musicAssistantToken,
@@ -204,6 +215,22 @@ class MobileSettingsActivity : FragmentActivity() {
                     markChanged()
                     page = SettingsPage.MAIN
                 },
+                onSaveTvdb = { key, pin ->
+                    tvdbApiKey = key.trim()
+                    tvdbSubscriberPin = pin.trim()
+                    preferences.edit()
+                        .putString("tvdb_api_key", tvdbApiKey)
+                        .putString("tvdb_subscriber_pin", tvdbSubscriberPin)
+                        .remove("tvdb_access_token")
+                        .remove("tvdb_access_token_created_at")
+                        .remove("tvdb_access_token_fingerprint")
+                        .apply()
+                    characterSuggestions = emptyList()
+                    selectedAvatarTitle = null
+                    avatarMessage = null
+                    markChanged()
+                    page = SettingsPage.MAIN
+                },
                 onSetPin = { pin ->
                     if (currentUser != null && currentServer != null) {
                         VesperProfilePinStore.setPin(this, currentServer.id, currentUser.id, pin)
@@ -221,8 +248,19 @@ class MobileSettingsActivity : FragmentActivity() {
                 onPickAvatarPhoto = {
                     avatarPhotoPicker.launch("image/*")
                 },
-                onUseAvatarSuggestion = { item ->
-                    updateAvatarFromSuggestion(item)
+                onChooseAvatarTitle = { item ->
+                    loadCharacterSuggestions(item)
+                },
+                onUseCharacter = { character ->
+                    updateAvatarFromCharacter(character)
+                },
+                onOpenTvdb = {
+                    startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://thetvdb.com/api-information/signup"),
+                        )
+                    )
                 },
                 onOpenJellyfinSettings = {
                     startActivity(Intent(this, PreferencesActivity::class.java))
@@ -247,15 +285,6 @@ class MobileSettingsActivity : FragmentActivity() {
                         sortOrder = setOf(SortOrder.ASCENDING),
                     ).content.items
 
-                    val resume = api.itemsApi.getResumeItems(
-                        fields = ItemRepository.browseFields,
-                        imageTypeLimit = 1,
-                        limit = 12,
-                        mediaTypes = listOf(MediaType.VIDEO),
-                        includeItemTypes = listOf(BaseItemKind.EPISODE, BaseItemKind.MOVIE),
-                        excludeActiveSessions = true,
-                    ).content.items
-
                     val popular = api.itemsApi.getItems(
                         fields = ItemRepository.browseFields,
                         includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
@@ -266,8 +295,11 @@ class MobileSettingsActivity : FragmentActivity() {
                         sortOrder = setOf(SortOrder.DESCENDING),
                     ).content.items
 
-                    (favourites + resume + popular)
-                        .filter { it.itemImages[ImageType.PRIMARY] != null }
+                    (favourites + popular)
+                        .filter { item ->
+                            item.itemImages[ImageType.PRIMARY] != null &&
+                                item.providerIds?.keys?.any { it.equals("Tvdb", ignoreCase = true) } == true
+                        }
                         .distinctBy { it.id }
                         .take(18)
                 }
@@ -300,28 +332,61 @@ class MobileSettingsActivity : FragmentActivity() {
         }
     }
 
-    private fun updateAvatarFromSuggestion(item: BaseItemDto) {
+    private fun loadCharacterSuggestions(item: BaseItemDto) {
+        selectedAvatarTitle = item
+        characterSuggestions = emptyList()
+        avatarMessage = null
+
+        if (tvdbApiKey.isBlank()) {
+            avatarMessage = "Set up TheTVDB in Connections to browse character artwork."
+            return
+        }
+
+        lifecycleScope.launch {
+            characterLoading = true
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    characterProvider.getCharacters(
+                        item = item,
+                        apiKey = tvdbApiKey,
+                        subscriberPin = tvdbSubscriberPin.ifBlank { null },
+                    )
+                }
+            }
+            characterLoading = false
+
+            result.fold(
+                onSuccess = { characters ->
+                    characterSuggestions = characters
+                    avatarMessage = if (characters.isEmpty()) {
+                        "No role-specific character artwork was found for ${item.name ?: "this title"}."
+                    } else {
+                        null
+                    }
+                },
+                onFailure = {
+                    avatarMessage = "Couldn't load character artwork. Check the TheTVDB connection."
+                },
+            )
+        }
+    }
+
+    private fun updateAvatarFromCharacter(character: VesperCharacterOption) {
         lifecycleScope.launch {
             avatarBusy = true
             avatarMessage = null
 
             val result = runCatching {
                 val imageBytes = withContext(Dispatchers.IO) {
-                    api.imageApi.getItemImage(
-                        itemId = item.id,
-                        imageType = ImageType.PRIMARY,
-                        maxWidth = 1200,
-                        maxHeight = 1200,
-                        quality = 92,
-                    ).content
+                    characterProvider.downloadImage(character.imageUrl)
                 }
                 uploadProfileAvatar(imageBytes)
             }
 
             avatarBusy = false
             avatarMessage = result.fold(
-                onSuccess = { "Using ${item.name ?: "Vesper artwork"} as your profile picture." },
-                onFailure = { "Couldn't use that artwork as the profile picture." },
+                onSuccess = { "Using ${character.name} as your profile picture." },
+                onFailure = { "Couldn't use that character artwork as the profile picture." },
             )
         }
     }
@@ -380,6 +445,8 @@ class MobileSettingsActivity : FragmentActivity() {
         showMiniPlayer = preferences.getBoolean("show_persistent_mini_player", true)
         popularityScope = preferences.getString("popularity_scope", "GLOBAL") ?: "GLOBAL"
         tmdbApiKey = preferences.getString("tmdb_api_key", "").orEmpty()
+        tvdbApiKey = preferences.getString("tvdb_api_key", "").orEmpty()
+        tvdbSubscriberPin = preferences.getString("tvdb_subscriber_pin", "").orEmpty()
         seerrApiKey = preferences.getString("seerr_api_key", "").orEmpty()
         musicAssistantUrl = preferences
             .getString("music_assistant_url", "http://192.168.1.34:8095")
@@ -399,6 +466,7 @@ private enum class SettingsPage {
     MUSIC_ASSISTANT,
     SEERR,
     TMDB,
+    TVDB,
 }
 
 @Composable
@@ -410,6 +478,9 @@ private fun VesperSettingsScreen(
     serverId: java.util.UUID?,
     pinConfigured: Boolean,
     avatarSuggestions: List<BaseItemDto>,
+    selectedAvatarTitle: BaseItemDto?,
+    characterSuggestions: List<VesperCharacterOption>,
+    characterLoading: Boolean,
     avatarBusy: Boolean,
     avatarMessage: String?,
     api: ApiClient,
@@ -418,6 +489,8 @@ private fun VesperSettingsScreen(
     showMiniPlayer: Boolean,
     popularityScope: String,
     tmdbApiKey: String,
+    tvdbApiKey: String,
+    tvdbSubscriberPin: String,
     seerrApiKey: String,
     musicAssistantUrl: String,
     musicAssistantToken: String,
@@ -428,10 +501,13 @@ private fun VesperSettingsScreen(
     onSaveMusicAssistant: (String, String) -> Unit,
     onSaveSeerr: (String) -> Unit,
     onSaveTmdb: (String) -> Unit,
+    onSaveTvdb: (String, String) -> Unit,
     onSetPin: (String) -> Unit,
     onRemovePin: () -> Unit,
     onPickAvatarPhoto: () -> Unit,
-    onUseAvatarSuggestion: (BaseItemDto) -> Unit,
+    onChooseAvatarTitle: (BaseItemDto) -> Unit,
+    onUseCharacter: (VesperCharacterOption) -> Unit,
+    onOpenTvdb: () -> Unit,
     onOpenJellyfinSettings: () -> Unit,
 ) {
     Box(
@@ -456,6 +532,7 @@ private fun VesperSettingsScreen(
                 showMiniPlayer = showMiniPlayer,
                 popularityScope = popularityScope,
                 tmdbConfigured = tmdbApiKey.isNotBlank(),
+                tvdbConfigured = tvdbApiKey.isNotBlank(),
                 seerrConfigured = seerrApiKey.isNotBlank(),
                 musicAssistantConfigured = musicAssistantUrl.isNotBlank() && musicAssistantToken.isNotBlank(),
                 onBack = onBack,
@@ -470,14 +547,21 @@ private fun VesperSettingsScreen(
                 userAvatarUrl = userAvatarUrl,
                 pinConfigured = pinConfigured,
                 avatarSuggestions = avatarSuggestions,
+                selectedAvatarTitle = selectedAvatarTitle,
+                characterSuggestions = characterSuggestions,
+                characterLoading = characterLoading,
                 avatarBusy = avatarBusy,
                 avatarMessage = avatarMessage,
+                tvdbConfigured = tvdbApiKey.isNotBlank(),
                 api = api,
                 onBack = onBack,
                 onSetPin = onSetPin,
                 onRemovePin = onRemovePin,
                 onPickAvatarPhoto = onPickAvatarPhoto,
-                onUseAvatarSuggestion = onUseAvatarSuggestion,
+                onChooseAvatarTitle = onChooseAvatarTitle,
+                onUseCharacter = onUseCharacter,
+                onConfigureTvdb = { onPage(SettingsPage.TVDB) },
+                onOpenTvdb = onOpenTvdb,
             )
 
             SettingsPage.JELLYFIN -> JellyfinSettingsPage(
@@ -504,6 +588,14 @@ private fun VesperSettingsScreen(
                 onBack = onBack,
                 onSave = onSaveTmdb,
             )
+
+            SettingsPage.TVDB -> TvdbSettingsPage(
+                initialKey = tvdbApiKey,
+                initialPin = tvdbSubscriberPin,
+                onBack = onBack,
+                onSave = onSaveTvdb,
+                onOpenTvdb = onOpenTvdb,
+            )
         }
     }
 }
@@ -517,6 +609,7 @@ private fun SettingsHome(
     showMiniPlayer: Boolean,
     popularityScope: String,
     tmdbConfigured: Boolean,
+    tvdbConfigured: Boolean,
     seerrConfigured: Boolean,
     musicAssistantConfigured: Boolean,
     onBack: () -> Unit,
@@ -615,6 +708,14 @@ private fun SettingsHome(
                     subtitle = "Global popularity and metadata",
                     status = if (tmdbConfigured) "Configured" else "Needs setup",
                     onClick = { onPage(SettingsPage.TMDB) },
+                )
+                SettingsDivider()
+                SettingsNavigationRow(
+                    icon = "C",
+                    title = "TheTVDB",
+                    subtitle = "Character artwork for Vesper profiles",
+                    status = if (tvdbConfigured) "Configured" else "Needs setup",
+                    onClick = { onPage(SettingsPage.TVDB) },
                 )
             }
         }
@@ -945,14 +1046,21 @@ private fun ProfileSecurityPage(
     userAvatarUrl: String?,
     pinConfigured: Boolean,
     avatarSuggestions: List<BaseItemDto>,
+    selectedAvatarTitle: BaseItemDto?,
+    characterSuggestions: List<VesperCharacterOption>,
+    characterLoading: Boolean,
     avatarBusy: Boolean,
     avatarMessage: String?,
+    tvdbConfigured: Boolean,
     api: ApiClient,
     onBack: () -> Unit,
     onSetPin: (String) -> Unit,
     onRemovePin: () -> Unit,
     onPickAvatarPhoto: () -> Unit,
-    onUseAvatarSuggestion: (BaseItemDto) -> Unit,
+    onChooseAvatarTitle: (BaseItemDto) -> Unit,
+    onUseCharacter: (VesperCharacterOption) -> Unit,
+    onConfigureTvdb: () -> Unit,
+    onOpenTvdb: () -> Unit,
 ) {
     SettingsDetailScaffold(
         title = "Profile & Security",
@@ -993,7 +1101,7 @@ private fun ProfileSecurityPage(
             Spacer(Modifier.height(5.dp))
             BasicText(
                 if (avatarBusy) "Updating profile picture…"
-                else "Tap the picture or choose one below.",
+                else "Upload your own photo or choose a character from Vesper.",
                 style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp),
             )
             Spacer(Modifier.height(14.dp))
@@ -1007,18 +1115,46 @@ private fun ProfileSecurityPage(
                 BasicText(
                     avatarMessage,
                     style = TextStyle(
-                        color = if (avatarMessage.startsWith("Couldn't")) Color(0xFFFFB7BE) else Color(0xFFA8D9C1),
+                        color = if (
+                            avatarMessage.startsWith("Couldn't") ||
+                            avatarMessage.startsWith("No role")
+                        ) Color(0xFFFFB7BE) else Color(0xFFA8D9C1),
                         fontSize = 11.sp,
+                        lineHeight = 15.sp,
                     ),
                 )
             }
         }
 
         Spacer(Modifier.height(22.dp))
+        SettingsSectionLabel("CHOOSE A CHARACTER")
+        Spacer(Modifier.height(7.dp))
 
-        if (avatarSuggestions.isNotEmpty()) {
-            SettingsSectionLabel("FROM YOUR VESPER LIBRARY")
-            Spacer(Modifier.height(8.dp))
+        if (!tvdbConfigured) {
+            SettingsCard {
+                Column(Modifier.padding(16.dp)) {
+                    BasicText(
+                        "Character artwork needs TheTVDB",
+                        style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    BasicText(
+                        "Vesper only shows role-specific images here — actor headshots are deliberately filtered out.",
+                        style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp, lineHeight = 16.sp),
+                    )
+                    Spacer(Modifier.height(13.dp))
+                    SettingsPrimaryButton(
+                        label = "Set up TheTVDB",
+                        onClick = onConfigureTvdb,
+                    )
+                }
+            }
+        } else if (avatarSuggestions.isNotEmpty()) {
+            BasicText(
+                "Pick a movie or series, then choose one of its real character images.",
+                style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp, lineHeight = 16.sp),
+            )
+            Spacer(Modifier.height(11.dp))
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(horizontal = 2.dp),
@@ -1027,16 +1163,61 @@ private fun ProfileSecurityPage(
                     items = avatarSuggestions,
                     key = { it.id },
                 ) { item ->
-                    AvatarSuggestionTile(
+                    AvatarTitleTile(
                         item = item,
                         api = api,
-                        enabled = !avatarBusy,
-                        onClick = { onUseAvatarSuggestion(item) },
+                        selected = selectedAvatarTitle?.id == item.id,
+                        enabled = !avatarBusy && !characterLoading,
+                        onClick = { onChooseAvatarTitle(item) },
                     )
                 }
             }
-            Spacer(Modifier.height(22.dp))
+
+            if (selectedAvatarTitle != null) {
+                Spacer(Modifier.height(18.dp))
+                BasicText(
+                    selectedAvatarTitle.name ?: "Characters",
+                    style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                )
+                Spacer(Modifier.height(9.dp))
+
+                when {
+                    characterLoading -> BasicText(
+                        "Finding character artwork…",
+                        style = TextStyle(color = Color(0xFF9AA3AF), fontSize = 11.sp),
+                    )
+
+                    characterSuggestions.isNotEmpty() -> LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(13.dp),
+                        contentPadding = PaddingValues(horizontal = 2.dp),
+                    ) {
+                        items(
+                            items = characterSuggestions,
+                            key = { it.name + it.imageUrl },
+                        ) { character ->
+                            CharacterSuggestionTile(
+                                character = character,
+                                enabled = !avatarBusy,
+                                onClick = { onUseCharacter(character) },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                BasicText(
+                    "Character artwork provided by TheTVDB",
+                    modifier = Modifier.clickable(onClick = onOpenTvdb),
+                    style = TextStyle(
+                        color = Color(0xFF8F82D3),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+            }
         }
+
+        Spacer(Modifier.height(22.dp))
 
         PinSettingsCard(
             pinConfigured = pinConfigured,
@@ -1055,16 +1236,17 @@ private fun ProfileSecurityPage(
 }
 
 @Composable
-private fun AvatarSuggestionTile(
+private fun AvatarTitleTile(
     item: BaseItemDto,
     api: ApiClient,
+    selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
     val imageUrl = item.itemImages[ImageType.PRIMARY]?.getUrl(
         api = api,
-        fillWidth = 260,
-        fillHeight = 260,
+        maxWidth = 240,
+        maxHeight = 360,
     )
 
     Column(
@@ -1073,10 +1255,15 @@ private fun AvatarSuggestionTile(
     ) {
         Box(
             modifier = Modifier
-                .size(72.dp)
-                .clip(CircleShape)
+                .width(76.dp)
+                .height(108.dp)
+                .clip(RoundedCornerShape(14.dp))
                 .background(Color(0xFF151A24))
-                .border(1.dp, Color(0x334D4A75), CircleShape)
+                .border(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) Color(0xFF8C72FF) else Color(0x334D4A75),
+                    shape = RoundedCornerShape(14.dp),
+                )
                 .clickable(enabled = enabled, onClick = onClick),
         ) {
             if (!imageUrl.isNullOrBlank()) {
@@ -1090,8 +1277,45 @@ private fun AvatarSuggestionTile(
         Spacer(Modifier.height(7.dp))
         BasicText(
             item.name ?: "Media",
-            style = TextStyle(color = Color(0xFFBBC2CC), fontSize = 9.sp),
-            maxLines = 1,
+            style = TextStyle(
+                color = if (selected) Color.White else Color(0xFFBBC2CC),
+                fontSize = 9.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            ),
+            maxLines = 2,
+        )
+    }
+}
+
+@Composable
+private fun CharacterSuggestionTile(
+    character: VesperCharacterOption,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.width(88.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(78.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF151A24))
+                .border(1.dp, Color(0x445E55A6), CircleShape)
+                .clickable(enabled = enabled, onClick = onClick),
+        ) {
+            AsyncImage(
+                modifier = Modifier.fillMaxSize(),
+                url = character.imageUrl,
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP,
+            )
+        }
+        Spacer(Modifier.height(7.dp))
+        BasicText(
+            character.name,
+            style = TextStyle(color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+            maxLines = 2,
         )
     }
 }
@@ -1441,6 +1665,62 @@ private fun TmdbSettingsPage(
         SettingsPrimaryButton(
             label = "Save key",
             onClick = { onSave(key) },
+            enabled = key.isNotBlank(),
+        )
+    }
+}
+
+@Composable
+private fun TvdbSettingsPage(
+    initialKey: String,
+    initialPin: String,
+    onBack: () -> Unit,
+    onSave: (String, String) -> Unit,
+    onOpenTvdb: () -> Unit,
+) {
+    var key by remember(initialKey) { mutableStateOf(initialKey) }
+    var pin by remember(initialPin) { mutableStateOf(initialPin) }
+
+    SettingsDetailScaffold(
+        title = "TheTVDB",
+        onBack = onBack,
+    ) {
+        SettingsInfoCard(
+            title = "Character artwork",
+            value = "TheTVDB API v4",
+            helper = "Vesper uses role-specific character images and filters out generic actor headshots. The subscriber PIN is optional and only needed for user-supported API access.",
+        )
+        Spacer(Modifier.height(16.dp))
+        SettingsField(
+            label = "Project API key",
+            value = key,
+            onValueChange = { key = it },
+            placeholder = "TheTVDB API key",
+            password = true,
+        )
+        Spacer(Modifier.height(14.dp))
+        SettingsField(
+            label = "Subscriber PIN (optional)",
+            value = pin,
+            onValueChange = { pin = it },
+            placeholder = "Leave blank if your key doesn't require one",
+            password = true,
+        )
+        Spacer(Modifier.height(14.dp))
+        SettingsSecondaryButton(
+            label = "Get / manage a TheTVDB API key",
+            onClick = onOpenTvdb,
+        )
+        Spacer(Modifier.height(12.dp))
+        BasicText(
+            "Character artwork metadata provided by TheTVDB.",
+            modifier = Modifier.clickable(onClick = onOpenTvdb),
+            style = TextStyle(color = Color(0xFF8F82D3), fontSize = 10.sp),
+        )
+        Spacer(Modifier.height(20.dp))
+        SettingsPrimaryButton(
+            label = "Save connection",
+            onClick = { onSave(key, pin) },
             enabled = key.isNotBlank(),
         )
     }
