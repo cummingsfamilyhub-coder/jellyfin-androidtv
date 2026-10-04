@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false">
+    <!--
+        Vesper permits cleartext transport so private-LAN services can remain
+        local-only. Music Assistant itself rejects public HTTP endpoints in
+        VesperMusicEndpoint; remote Music Anywhere remains HTTPS/WSS only.
+    -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
