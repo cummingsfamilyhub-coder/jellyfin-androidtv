@@ -10,6 +10,7 @@ on:
       - "app/**"
       - "sendspin-shared/**"
       - "VESPER.md"
+      - "VESPER_STATUS.md"
   workflow_dispatch:
 
 permissions:
