@@ -172,8 +172,12 @@ internal class VesperMusicPlaybackService : Service() {
             ?: snapshot.players.firstOrNull { it.name == DEVICE_NAME }
 
         if (player != null) currentPlayerId = player.playerId
+        val changed = player != currentPlayer
         currentPlayer = player
         updateSession(player, null)
+        if (changed) {
+            playerRefreshEvents.tryEmit(Unit)
+        }
     }
 
     private fun updateSession(player: MaPlayer?, statusOverride: String?) {
