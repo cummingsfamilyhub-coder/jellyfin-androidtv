@@ -134,6 +134,7 @@ class MobileMainActivity : FragmentActivity() {
     private var musicAssistantToken by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
     private var showPersistentMiniPlayer by mutableStateOf(true)
+    private var sendspinRuntime: VesperSendspinRuntime? = null
     private val hydratedTabs = mutableSetOf<MobileTab>()
     private val loadingTabs = mutableSetOf<MobileTab>()
 
@@ -212,8 +213,23 @@ class MobileMainActivity : FragmentActivity() {
 
         loadHome()
         if (musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank()) {
+            sendspinRuntime = runCatching {
+                VesperSendspinRuntime(
+                    context = this,
+                    musicAssistantBaseUrl = musicAssistantBaseUrl,
+                    token = musicAssistantToken,
+                    scope = lifecycleScope,
+                    onPlayerRefresh = ::loadMusic,
+                )
+            }.getOrNull()
             loadMusic()
         }
+    }
+
+    override fun onDestroy() {
+        sendspinRuntime?.close()
+        sendspinRuntime = null
+        super.onDestroy()
     }
 
     private fun loadHome() {
