@@ -7,3 +7,5 @@ Licence: Apache License 2.0 (see MUSIC_ASSISTANT_SENDSPIN_LICENSE.txt)
 
 Vesper keeps this engine isolated inside :sendspin-shared. Platform audio output,
 MediaSession integration, UI and application settings remain Vesper-owned.
+
+Imported as a green-build checkpoint before Vesper-specific Android audio wiring.
