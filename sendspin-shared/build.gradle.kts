@@ -21,7 +21,7 @@ kotlin {
             dependencies {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
-                implementation("org.jetbrains.kotlinx:kotlinx-atomicfu:0.33.0")
+                implementation("org.jetbrains.kotlinx:atomicfu:0.33.0")
                 implementation("io.ktor:ktor-serialization-kotlinx-json:3.5.2")
                 implementation("co.touchlab:kermit:2.1.0")
                 implementation("dev.whyoleg.cryptography:cryptography-core:0.6.0")
