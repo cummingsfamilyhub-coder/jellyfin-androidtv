@@ -479,6 +479,7 @@ internal class MusicAssistantClient(
     private fun playerPriority(name: String): Int {
         val n = name.lowercase()
         return when {
+            n == "this device" -> -1
             "living room" in n -> 0
             "den" in n -> 1
             "kitchen" in n -> 2
