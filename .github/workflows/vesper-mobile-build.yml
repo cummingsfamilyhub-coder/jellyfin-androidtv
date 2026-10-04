@@ -42,7 +42,6 @@ jobs:
 
           build = Path("app/build.gradle.kts")
           text = build.read_text(encoding="utf-8")
-          text = text.replace("app.vesper.androidtv", "app.vesper.mobile")
           text = text.replace('base.archivesName.set("vesper-v${project.getVersionName()}")',
                               'base.archivesName.set("vesper-mobile-v${project.getVersionName()}")')
           build.write_text(text, encoding="utf-8")
