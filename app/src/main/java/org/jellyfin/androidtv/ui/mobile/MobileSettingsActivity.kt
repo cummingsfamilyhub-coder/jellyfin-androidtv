@@ -1,10 +1,14 @@
 package org.jellyfin.androidtv.ui.mobile
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +26,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
@@ -43,14 +49,32 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import org.jellyfin.androidtv.VesperServiceConfig
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
+import org.jellyfin.androidtv.data.repository.ItemRepository
+import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.jellyfin.androidtv.ui.preference.PreferencesActivity
 import org.jellyfin.androidtv.util.apiclient.getUrl
+import org.jellyfin.androidtv.util.apiclient.itemImages
 import org.jellyfin.androidtv.util.apiclient.primaryImage
 import org.jellyfin.sdk.api.client.ApiClient
+import org.jellyfin.sdk.api.client.extensions.imageApi
+import org.jellyfin.sdk.api.client.extensions.itemsApi
+import org.jellyfin.sdk.model.FileInfo
+import org.jellyfin.sdk.model.api.BaseItemDto
+import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.ImageType
+import org.jellyfin.sdk.model.api.ItemFilter
+import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.MediaType
+import org.jellyfin.sdk.model.api.SortOrder
 import org.koin.android.ext.android.inject
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MobileSettingsActivity : FragmentActivity() {
     private val userRepository by inject<UserRepository>()
@@ -66,6 +90,16 @@ class MobileSettingsActivity : FragmentActivity() {
     private var musicAssistantUrl by mutableStateOf("")
     private var musicAssistantToken by mutableStateOf("")
     private var pinConfigured by mutableStateOf(false)
+    private var profileImageUrl by mutableStateOf<String?>(null)
+    private var avatarSuggestions by mutableStateOf<List<BaseItemDto>>(emptyList())
+    private var avatarBusy by mutableStateOf(false)
+    private var avatarMessage by mutableStateOf<String?>(null)
+
+    private val avatarPhotoPicker = registerForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) updateAvatarFromUri(uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,7 +107,14 @@ class MobileSettingsActivity : FragmentActivity() {
 
         val currentUser = userRepository.currentUser.value
         val currentServer = serverRepository.currentServer.value
-        val profileImageUrl = currentUser?.primaryImage?.getUrl(api)
+        profileImageUrl = currentUser?.let { user ->
+            val revision = preferences.getLong(avatarRevisionKey(user.id), 0L)
+            if (revision > 0L) {
+                api.imageApi.getUserImageUrl(userId = user.id, tag = revision.toString())
+            } else {
+                user.primaryImage?.getUrl(api)
+            }
+        }
         pinConfigured = if (currentUser != null && currentServer != null) {
             VesperProfilePinStore.hasPin(this, currentServer.id, currentUser.id)
         } else {
@@ -87,6 +128,7 @@ class MobileSettingsActivity : FragmentActivity() {
             packageInfo.versionCode.toLong()
         }
         val appVersion = "${packageInfo.versionName ?: "dev"} ($versionCode)"
+        loadAvatarSuggestions()
 
         setContent {
             var page by remember { mutableStateOf(SettingsPage.MAIN) }
@@ -103,6 +145,10 @@ class MobileSettingsActivity : FragmentActivity() {
                 userId = currentUser?.id,
                 serverId = currentServer?.id,
                 pinConfigured = pinConfigured,
+                avatarSuggestions = avatarSuggestions,
+                avatarBusy = avatarBusy,
+                avatarMessage = avatarMessage,
+                api = api,
                 appVersion = appVersion,
                 jellyfinName = currentServer?.name ?: "Jellyfin",
                 showMiniPlayer = showMiniPlayer,
@@ -171,12 +217,163 @@ class MobileSettingsActivity : FragmentActivity() {
                         markChanged()
                     }
                 },
+                onPickAvatarPhoto = {
+                    avatarPhotoPicker.launch("image/*")
+                },
+                onUseAvatarSuggestion = { item ->
+                    updateAvatarFromSuggestion(item)
+                },
                 onOpenJellyfinSettings = {
                     startActivity(Intent(this, PreferencesActivity::class.java))
                 },
             )
         }
     }
+
+    private fun loadAvatarSuggestions() {
+        lifecycleScope.launch {
+            avatarMessage = null
+            val suggestions = runCatching {
+                withContext(Dispatchers.IO) {
+                    val favourites = api.itemsApi.getItems(
+                        fields = ItemRepository.browseFields,
+                        includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                        recursive = true,
+                        filters = setOf(ItemFilter.IS_FAVORITE),
+                        imageTypeLimit = 1,
+                        limit = 12,
+                        sortBy = setOf(ItemSortBy.SORT_NAME),
+                        sortOrder = setOf(SortOrder.ASCENDING),
+                    ).content.items
+
+                    val resume = api.itemsApi.getResumeItems(
+                        fields = ItemRepository.browseFields,
+                        imageTypeLimit = 1,
+                        limit = 12,
+                        mediaTypes = listOf(MediaType.VIDEO),
+                        includeItemTypes = listOf(BaseItemKind.EPISODE, BaseItemKind.MOVIE),
+                        excludeActiveSessions = true,
+                    ).content.items
+
+                    val popular = api.itemsApi.getItems(
+                        fields = ItemRepository.browseFields,
+                        includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                        recursive = true,
+                        imageTypeLimit = 1,
+                        limit = 18,
+                        sortBy = setOf(ItemSortBy.PLAY_COUNT),
+                        sortOrder = setOf(SortOrder.DESCENDING),
+                    ).content.items
+
+                    (favourites + resume + popular)
+                        .filter { it.itemImages[ImageType.PRIMARY] != null }
+                        .distinctBy { it.id }
+                        .take(18)
+                }
+            }.getOrElse {
+                avatarMessage = "Couldn't load Vesper avatar suggestions."
+                emptyList()
+            }
+            avatarSuggestions = suggestions
+        }
+    }
+
+    private fun updateAvatarFromUri(uri: Uri) {
+        lifecycleScope.launch {
+            avatarBusy = true
+            avatarMessage = null
+
+            val result = runCatching {
+                val bytes = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { input -> input.readBytes() }
+                        ?: error("Couldn't read that image.")
+                }
+                uploadProfileAvatar(bytes)
+            }
+
+            avatarBusy = false
+            avatarMessage = result.fold(
+                onSuccess = { "Profile picture updated." },
+                onFailure = { "Couldn't update the profile picture." },
+            )
+        }
+    }
+
+    private fun updateAvatarFromSuggestion(item: BaseItemDto) {
+        lifecycleScope.launch {
+            avatarBusy = true
+            avatarMessage = null
+
+            val result = runCatching {
+                val imageBytes = withContext(Dispatchers.IO) {
+                    api.imageApi.getItemImage(
+                        itemId = item.id,
+                        imageType = ImageType.PRIMARY,
+                        maxWidth = 1200,
+                        maxHeight = 1200,
+                        quality = 92,
+                    ).content
+                }
+                uploadProfileAvatar(imageBytes)
+            }
+
+            avatarBusy = false
+            avatarMessage = result.fold(
+                onSuccess = { "Using ${item.name ?: "Vesper artwork"} as your profile picture." },
+                onFailure = { "Couldn't use that artwork as the profile picture." },
+            )
+        }
+    }
+
+    private suspend fun uploadProfileAvatar(sourceBytes: ByteArray) {
+        val currentUser = userRepository.currentUser.value ?: error("No active Jellyfin user.")
+        val jpegBytes = withContext(Dispatchers.IO) {
+            squareAvatarJpeg(sourceBytes)
+        }
+
+        api.imageApi.postUserImage(
+            userId = currentUser.id,
+            data = FileInfo(
+                content = jpegBytes,
+                mediaType = "image/jpeg",
+            ),
+        )
+
+        val revision = System.currentTimeMillis()
+        preferences.edit()
+            .putLong(avatarRevisionKey(currentUser.id), revision)
+            .apply()
+
+        profileImageUrl = api.imageApi.getUserImageUrl(
+            userId = currentUser.id,
+            tag = revision.toString(),
+        )
+        markChanged()
+    }
+
+    private fun squareAvatarJpeg(sourceBytes: ByteArray): ByteArray {
+        val source = BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size)
+            ?: error("Unsupported image.")
+
+        val side = minOf(source.width, source.height)
+        val left = (source.width - side) / 2
+        val top = (source.height - side) / 2
+
+        val cropped = Bitmap.createBitmap(source, left, top, side, side)
+        val scaled = if (side == 640) cropped else Bitmap.createScaledBitmap(cropped, 640, 640, true)
+
+        val output = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 92, output)
+
+        if (scaled !== cropped) scaled.recycle()
+        if (cropped !== source) cropped.recycle()
+        source.recycle()
+
+        return output.toByteArray()
+    }
+
+    private fun avatarRevisionKey(userId: java.util.UUID): String =
+        "profile_avatar_revision_$userId"
 
     private fun loadPreferences() {
         showMiniPlayer = preferences.getBoolean("show_persistent_mini_player", true)
@@ -211,6 +408,10 @@ private fun VesperSettingsScreen(
     userId: java.util.UUID?,
     serverId: java.util.UUID?,
     pinConfigured: Boolean,
+    avatarSuggestions: List<BaseItemDto>,
+    avatarBusy: Boolean,
+    avatarMessage: String?,
+    api: ApiClient,
     appVersion: String,
     jellyfinName: String,
     showMiniPlayer: Boolean,
@@ -228,6 +429,8 @@ private fun VesperSettingsScreen(
     onSaveTmdb: (String) -> Unit,
     onSetPin: (String) -> Unit,
     onRemovePin: () -> Unit,
+    onPickAvatarPhoto: () -> Unit,
+    onUseAvatarSuggestion: (BaseItemDto) -> Unit,
     onOpenJellyfinSettings: () -> Unit,
 ) {
     Box(
@@ -265,9 +468,15 @@ private fun VesperSettingsScreen(
                 userName = userName,
                 userAvatarUrl = userAvatarUrl,
                 pinConfigured = pinConfigured,
+                avatarSuggestions = avatarSuggestions,
+                avatarBusy = avatarBusy,
+                avatarMessage = avatarMessage,
+                api = api,
                 onBack = onBack,
                 onSetPin = onSetPin,
                 onRemovePin = onRemovePin,
+                onPickAvatarPhoto = onPickAvatarPhoto,
+                onUseAvatarSuggestion = onUseAvatarSuggestion,
             )
 
             SettingsPage.JELLYFIN -> JellyfinSettingsPage(
@@ -734,9 +943,15 @@ private fun ProfileSecurityPage(
     userName: String,
     userAvatarUrl: String?,
     pinConfigured: Boolean,
+    avatarSuggestions: List<BaseItemDto>,
+    avatarBusy: Boolean,
+    avatarMessage: String?,
+    api: ApiClient,
     onBack: () -> Unit,
     onSetPin: (String) -> Unit,
     onRemovePin: () -> Unit,
+    onPickAvatarPhoto: () -> Unit,
+    onUseAvatarSuggestion: (BaseItemDto) -> Unit,
 ) {
     SettingsDetailScaffold(
         title = "Profile & Security",
@@ -746,11 +961,29 @@ private fun ProfileSecurityPage(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            VesperProfileAvatar(
-                name = userName,
-                imageUrl = userAvatarUrl,
-                modifier = Modifier.size(88.dp),
-            )
+            Box {
+                VesperProfileAvatar(
+                    name = userName,
+                    imageUrl = userAvatarUrl,
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clickable(enabled = !avatarBusy, onClick = onPickAvatarPhoto),
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF6E55E8))
+                        .border(2.dp, Color(0xFF090A11), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(
+                        "✎",
+                        style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                    )
+                }
+            }
             Spacer(Modifier.height(12.dp))
             BasicText(
                 userName,
@@ -758,13 +991,51 @@ private fun ProfileSecurityPage(
             )
             Spacer(Modifier.height(5.dp))
             BasicText(
-                if (userAvatarUrl.isNullOrBlank()) "Using Vesper initials until a Jellyfin profile picture is added."
-                else "Using your Jellyfin profile picture.",
+                if (avatarBusy) "Updating profile picture…"
+                else "Tap the picture or choose one below.",
                 style = TextStyle(color = Color(0xFF858E9A), fontSize = 11.sp),
             )
+            Spacer(Modifier.height(14.dp))
+            SettingsPrimaryButton(
+                label = if (avatarBusy) "Updating…" else "Choose a photo",
+                onClick = onPickAvatarPhoto,
+                enabled = !avatarBusy,
+            )
+            if (!avatarMessage.isNullOrBlank()) {
+                Spacer(Modifier.height(8.dp))
+                BasicText(
+                    avatarMessage,
+                    style = TextStyle(
+                        color = if (avatarMessage.startsWith("Couldn't")) Color(0xFFFFB7BE) else Color(0xFFA8D9C1),
+                        fontSize = 11.sp,
+                    ),
+                )
+            }
         }
 
         Spacer(Modifier.height(22.dp))
+
+        if (avatarSuggestions.isNotEmpty()) {
+            SettingsSectionLabel("FROM YOUR VESPER LIBRARY")
+            Spacer(Modifier.height(8.dp))
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp),
+            ) {
+                items(
+                    items = avatarSuggestions,
+                    key = { it.id },
+                ) { item ->
+                    AvatarSuggestionTile(
+                        item = item,
+                        api = api,
+                        enabled = !avatarBusy,
+                        onClick = { onUseAvatarSuggestion(item) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(22.dp))
+        }
 
         PinSettingsCard(
             pinConfigured = pinConfigured,
@@ -778,6 +1049,48 @@ private fun ProfileSecurityPage(
             title = "Jellyfin password",
             value = "Still your real account credential",
             helper = "The optional Vesper PIN only unlocks this saved profile on this device. It never replaces your Jellyfin password.",
+        )
+    }
+}
+
+@Composable
+private fun AvatarSuggestionTile(
+    item: BaseItemDto,
+    api: ApiClient,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val imageUrl = item.itemImages[ImageType.PRIMARY]?.getUrl(
+        api = api,
+        fillWidth = 260,
+        fillHeight = 260,
+    )
+
+    Column(
+        modifier = Modifier.width(82.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF151A24))
+                .border(1.dp, Color(0x334D4A75), CircleShape)
+                .clickable(enabled = enabled, onClick = onClick),
+        ) {
+            if (!imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = imageUrl,
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP,
+                )
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        BasicText(
+            item.name ?: "Media",
+            style = TextStyle(color = Color(0xFFBBC2CC), fontSize = 9.sp),
+            maxLines = 1,
         )
     }
 }
