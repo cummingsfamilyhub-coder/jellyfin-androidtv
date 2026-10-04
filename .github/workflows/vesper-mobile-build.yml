@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - vesper
+      - vesper-mobile-vnext
     paths:
       - ".github/workflows/vesper-mobile-build.yml"
       - "app/**"
+      - "sendspin-shared/**"
       - "VESPER.md"
   workflow_dispatch:
 
