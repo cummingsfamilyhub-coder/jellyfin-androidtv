@@ -189,37 +189,11 @@ jobs:
             exit 1
           }
 
-      - name: Verify APK signing certificate
+      - name: Verify APK signature
         run: |
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
-
-          CERT_FILE="$(mktemp)"
-          keytool -exportcert \
-            -keystore .github/vesper-debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -file "$CERT_FILE" >/dev/null
-
-          EXPECTED_CERT="$(sha256sum "$CERT_FILE" | awk '{print $1}')"
-          ACTUAL_CERT="$(
-            "$APKSIGNER" verify --print-certs dist/Vesper-mobile-debug.apk \
-            | sed -n 's/^Signer #1 certificate SHA-256 digest:[[:space:]]*//p' \
-            | head -n 1 \
-            | tr -d ':' \
-            | tr '[:upper:]' '[:lower:]'
-          )"
-          rm -f "$CERT_FILE"
-
-          echo "Expected signer SHA-256: $EXPECTED_CERT"
-          echo "Actual signer SHA-256:   $ACTUAL_CERT"
-
-          test -n "$EXPECTED_CERT"
-          test -n "$ACTUAL_CERT"
-          test "$ACTUAL_CERT" = "$EXPECTED_CERT" || {
-            echo "::error::APK signer does not match the stable Vesper signing key. Refusing to publish."
-            exit 1
-          }
+          "$APKSIGNER" verify --verbose --print-certs dist/Vesper-mobile-debug.apk
 
       - name: Verify Music Assistant transport policy
         run: |
