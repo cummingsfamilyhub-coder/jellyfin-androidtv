@@ -122,7 +122,14 @@ internal class MusicAssistantClient(
                 val queue = activeSource?.let(queues::get) ?: queues[playerId]
                 parsePlayer(playerJson, queue)
             }
-            .filter { it.available && it.enabled && !it.hidden && !it.privatePlayer }
+            .filter {
+                it.available &&
+                    it.enabled &&
+                    (
+                        it.name.equals("This Device", ignoreCase = true) ||
+                            (!it.hidden && !it.privatePlayer)
+                    )
+            }
             .filter { it.type !in setOf("protocol", "source", "visualizer", "light") }
             .sortedWith(
                 compareBy<MaPlayer> { playerPriority(it.name) }
