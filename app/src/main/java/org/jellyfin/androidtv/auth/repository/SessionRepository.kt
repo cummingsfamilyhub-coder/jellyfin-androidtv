@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jellyfin.androidtv.VesperServiceConfig
 import org.jellyfin.androidtv.auth.model.Server
 import org.jellyfin.androidtv.auth.store.AuthenticationPreferences
@@ -70,21 +71,35 @@ class SessionRepositoryImpl(
 
 			_state.value = SessionRepositoryState.RESTORING_SESSION
 
-			val alwaysAuthenticate = authenticationPreferences[AuthenticationPreferences.alwaysAuthenticate]
-			val autoLoginBehavior = authenticationPreferences[AuthenticationPreferences.autoLoginUserBehavior]
-
-			when {
-				alwaysAuthenticate -> destroyCurrentSession()
-				autoLoginBehavior == DISABLED -> destroyCurrentSession()
-				autoLoginBehavior == LAST_USER && !destroyOnly -> setCurrentSession(createLastUserSession())
-				autoLoginBehavior == SPECIFIC_USER && !destroyOnly -> {
-					val serverId = authenticationPreferences[AuthenticationPreferences.autoLoginServerId].toUUIDOrNull()
-					val userId = authenticationPreferences[AuthenticationPreferences.autoLoginUserId].toUUIDOrNull()
-					if (serverId != null && userId != null) setCurrentSession(createUserSession(serverId, userId))
+			try {
+				// Restoring talks to the network. A stalled request must never hold the
+				// launcher (or this mutex) forever on cold start.
+				val completed = withTimeoutOrNull(RESTORE_TIMEOUT_MS) {
+					restoreSessionLocked(destroyOnly)
 				}
+				if (completed == null) Timber.w("Session restore timed out after ${RESTORE_TIMEOUT_MS}ms")
+			} catch (err: Exception) {
+				Timber.e(err, "Session restore failed")
+			} finally {
+				// Always publish READY, otherwise anything awaiting restore waits forever.
+				_state.value = SessionRepositoryState.READY
 			}
+		}
+	}
 
-			_state.value = SessionRepositoryState.READY
+	private suspend fun restoreSessionLocked(destroyOnly: Boolean) {
+		val alwaysAuthenticate = authenticationPreferences[AuthenticationPreferences.alwaysAuthenticate]
+		val autoLoginBehavior = authenticationPreferences[AuthenticationPreferences.autoLoginUserBehavior]
+
+		when {
+			alwaysAuthenticate -> destroyCurrentSession()
+			autoLoginBehavior == DISABLED -> destroyCurrentSession()
+			autoLoginBehavior == LAST_USER && !destroyOnly -> setCurrentSession(createLastUserSession())
+			autoLoginBehavior == SPECIFIC_USER && !destroyOnly -> {
+				val serverId = authenticationPreferences[AuthenticationPreferences.autoLoginServerId].toUUIDOrNull()
+				val userId = authenticationPreferences[AuthenticationPreferences.autoLoginUserId].toUUIDOrNull()
+				if (serverId != null && userId != null) setCurrentSession(createUserSession(serverId, userId))
+			}
 		}
 	}
 
@@ -210,5 +225,9 @@ class SessionRepositoryImpl(
 		}
 
 		return true
+	}
+
+	private companion object {
+		const val RESTORE_TIMEOUT_MS = 12_000L
 	}
 }

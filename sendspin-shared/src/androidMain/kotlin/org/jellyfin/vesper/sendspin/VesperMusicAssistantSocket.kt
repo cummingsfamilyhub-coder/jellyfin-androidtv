@@ -2,6 +2,7 @@ package org.jellyfin.vesper.sendspin
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.url
@@ -12,8 +13,10 @@ import io.ktor.websocket.send
 import java.io.Closeable
 import java.net.URI
 import java.util.UUID
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -23,11 +26,20 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
+ * Music Assistant answered a command with an error. The socket itself is healthy,
+ * so this must not trigger a reconnect, and the message is MA's own details.
+ */
+class MusicAssistantCommandException(message: String) : Exception(message)
+
+/**
  * Persistent Music Assistant command socket for Vesper's private on-device player.
  *
  * MA binds a Sendspin web/app player to websocket API sessions holding the same
  * token. Keeping this socket authenticated before Sendspin connects makes
  * "This Device" controllable by the same client that owns it.
+ *
+ * Every network wait is bounded, and a dropped socket is replaced automatically
+ * on the next command instead of failing until the app is restarted.
  */
 class VesperMusicAssistantSocket(
     private val baseUrl: String,
@@ -39,18 +51,42 @@ class VesperMusicAssistantSocket(
     }
     private val mutex = Mutex()
     private val json = Json { ignoreUnknownKeys = true }
-    private var session: io.ktor.client.plugins.websocket.DefaultClientWebSocketSession? = null
+    private var session: DefaultClientWebSocketSession? = null
 
     suspend fun connect() {
+        mutex.withLock { connectLocked() }
+    }
+
+    suspend fun command(command: String, args: JsonObject = JsonObject(emptyMap())): JsonElement? =
         mutex.withLock {
-            if (session != null) return@withLock
-            require(token.isNotBlank()) { "Music Assistant token is missing." }
-
-            val wsUrl = websocketUrl(baseUrl)
-            val connected = client.webSocketSession { url(wsUrl) }
-            session = connected
-
+            // Reconnects transparently if the previous socket dropped.
+            val active = connectLocked()
             try {
+                withTimeout(COMMAND_TIMEOUT_MS) { sendCommandLocked(active, command, args) }
+            } catch (error: MusicAssistantCommandException) {
+                throw error
+            } catch (error: Throwable) {
+                // Timeout or transport failure: discard this socket so the next
+                // command starts from a clean connection.
+                dropSessionLocked(active)
+                throw error
+            }
+        }
+
+    private suspend fun connectLocked(): DefaultClientWebSocketSession {
+        session?.let { existing ->
+            if (existing.isActive) return existing
+        }
+        session = null
+        require(token.isNotBlank()) { "Music Assistant token is missing." }
+
+        val wsUrl = websocketUrl(baseUrl)
+        val connected = withTimeout(CONNECT_TIMEOUT_MS) {
+            client.webSocketSession { url(wsUrl) }
+        }
+
+        try {
+            withTimeout(CONNECT_TIMEOUT_MS) {
                 awaitServerInfo(connected)
                 sendCommandLocked(
                     connected,
@@ -60,23 +96,22 @@ class VesperMusicAssistantSocket(
                         put("device_name", JsonPrimitive(deviceName))
                     },
                 )
-            } catch (error: Throwable) {
-                session = null
-                runCatching { connected.close() }
-                throw error
             }
+        } catch (error: Throwable) {
+            runCatching { connected.close() }
+            throw error
         }
+
+        session = connected
+        return connected
     }
 
-    suspend fun command(command: String, args: JsonObject = JsonObject(emptyMap())): JsonElement? =
-        mutex.withLock {
-            val active = session ?: error("Music Assistant control socket is not connected.")
-            sendCommandLocked(active, command, args)
-        }
+    private suspend fun dropSessionLocked(active: DefaultClientWebSocketSession) {
+        if (session === active) session = null
+        runCatching { active.close() }
+    }
 
-    private suspend fun awaitServerInfo(
-        active: io.ktor.client.plugins.websocket.DefaultClientWebSocketSession,
-    ) {
+    private suspend fun awaitServerInfo(active: DefaultClientWebSocketSession) {
         while (true) {
             val frame = active.incoming.receive()
             if (frame !is KtorFrame.Text) continue
@@ -86,7 +121,7 @@ class VesperMusicAssistantSocket(
     }
 
     private suspend fun sendCommandLocked(
-        active: io.ktor.client.plugins.websocket.DefaultClientWebSocketSession,
+        active: DefaultClientWebSocketSession,
         command: String,
         args: JsonObject,
     ): JsonElement? {
@@ -107,7 +142,7 @@ class VesperMusicAssistantSocket(
             response["error_code"]?.let {
                 val details = response["details"]?.jsonPrimitive?.contentOrNull
                     ?: "Music Assistant command failed."
-                error(details)
+                throw MusicAssistantCommandException(details)
             }
             return response["result"]
         }
@@ -128,5 +163,10 @@ class VesperMusicAssistantSocket(
         val path = uri.rawPath?.trimEnd('/').orEmpty()
         val wsPath = if (path.isBlank() || path == "/") "/ws" else "$path/ws"
         return URI(scheme, uri.userInfo, uri.host, uri.port, wsPath, null, null).toString()
+    }
+
+    private companion object {
+        const val CONNECT_TIMEOUT_MS = 10_000L
+        const val COMMAND_TIMEOUT_MS = 15_000L
     }
 }
