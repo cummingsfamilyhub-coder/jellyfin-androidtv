@@ -52,6 +52,7 @@ internal class VesperMusicPlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
         createNotificationChannel()
 
         mediaSession = MediaSession(this, "Vesper This Device").apply {
@@ -145,9 +146,7 @@ internal class VesperMusicPlaybackService : Service() {
                 }
                 if (event is PlayerEvent.PlaybackStopped && event.cause == StopCause.FocusLost) {
                     currentPlayerId?.let { playerId ->
-                        withContext(Dispatchers.IO) {
-                            runCatching { musicAssistantClient?.pause(playerId) }
-                        }
+                        runCatching { runtime?.pause(playerId) }
                     }
                 }
             }
@@ -217,20 +216,42 @@ internal class VesperMusicPlaybackService : Service() {
         serviceScope.launch {
             val client = musicAssistantClient ?: return@launch
             val playerId = resolvePlayerId(client) ?: return@launch
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    when (control) {
-                        Control.PLAY -> client.resume(playerId)
-                        Control.PAUSE -> client.pause(playerId)
-                        Control.NEXT -> client.next(playerId)
-                        Control.PREVIOUS -> client.previous(playerId)
-                    }
+            val activeRuntime = runtime ?: return@launch
+            runCatching {
+                when (control) {
+                    Control.PLAY -> activeRuntime.resume(playerId)
+                    Control.PAUSE -> activeRuntime.pause(playerId)
+                    Control.NEXT -> activeRuntime.next(playerId)
+                    Control.PREVIOUS -> activeRuntime.previous(playerId)
                 }
             }
             delay(CONTROL_REFRESH_DELAY_MS)
             refreshPlayer()
             playerRefreshEvents.tryEmit(Unit)
         }
+    }
+
+    private suspend fun playLocalMediaInternal(itemUri: String, playerId: String) {
+        val deadline = System.currentTimeMillis() + LOCAL_PLAY_READY_TIMEOUT_MS
+        var lastError: Throwable? = null
+
+        while (System.currentTimeMillis() < deadline) {
+            val activeRuntime = runtime
+            if (activeRuntime != null && activeRuntime.state.value is PlayerState.Connected) {
+                try {
+                    activeRuntime.playMedia(itemUri, playerId)
+                    return
+                } catch (error: Throwable) {
+                    lastError = error
+                }
+            }
+            delay(LOCAL_PLAY_RETRY_DELAY_MS)
+        }
+
+        throw IllegalStateException(
+            lastError?.message ?: "This Device is still connecting to Music Assistant.",
+            lastError,
+        )
     }
 
     private suspend fun resolvePlayerId(client: MusicAssistantClient): String? {
@@ -328,6 +349,7 @@ internal class VesperMusicPlaybackService : Service() {
     }
 
     override fun onDestroy() {
+        if (activeInstance === this) activeInstance = null
         closeRuntime()
         mediaSession.isActive = false
         mediaSession.release()
@@ -343,6 +365,9 @@ internal class VesperMusicPlaybackService : Service() {
     }
 
     companion object {
+        @Volatile
+        private var activeInstance: VesperMusicPlaybackService? = null
+
         const val ACTION_CONFIGURE = "app.vesper.mobile.music.CONFIGURE"
         private const val ACTION_PLAY = "app.vesper.mobile.music.PLAY"
         private const val ACTION_PAUSE = "app.vesper.mobile.music.PAUSE"
@@ -351,12 +376,26 @@ internal class VesperMusicPlaybackService : Service() {
 
         val playerRefreshEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
+        suspend fun playLocalMedia(itemUri: String, playerId: String) {
+            val deadline = System.currentTimeMillis() + SERVICE_READY_TIMEOUT_MS
+            while (activeInstance == null && System.currentTimeMillis() < deadline) {
+                delay(SERVICE_READY_RETRY_DELAY_MS)
+            }
+            val service = activeInstance
+                ?: error("Vesper music service is not ready.")
+            service.playLocalMediaInternal(itemUri, playerId)
+        }
+
         private const val PREFERENCES_NAME = "vesper"
         private const val DEVICE_NAME = "This Device"
         private const val CHANNEL_ID = "vesper_music_playback"
         private const val NOTIFICATION_ID = 4207
         private const val REFRESH_INTERVAL_MS = 2_000L
         private const val CONTROL_REFRESH_DELAY_MS = 300L
+        private const val LOCAL_PLAY_READY_TIMEOUT_MS = 10_000L
+        private const val LOCAL_PLAY_RETRY_DELAY_MS = 400L
+        private const val SERVICE_READY_TIMEOUT_MS = 3_000L
+        private const val SERVICE_READY_RETRY_DELAY_MS = 100L
 
         private const val REQUEST_OPEN_APP = 1
         private const val REQUEST_PREVIOUS = 2
