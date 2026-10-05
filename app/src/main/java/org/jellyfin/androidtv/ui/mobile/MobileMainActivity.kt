@@ -786,17 +786,19 @@ class MobileMainActivity : FragmentActivity() {
         lifecycleScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val client = MusicAssistantClient(
-                        baseUrl = musicAssistantBaseUrl,
-                        token = musicAssistantToken,
-                    )
                     if (
                         players.size == 1 &&
                         players.first().name.equals("This Device", ignoreCase = true)
                     ) {
-                        client.playLocalWhenReady(item, players.first().playerId)
+                        VesperMusicPlaybackService.playLocalMedia(
+                            itemUri = item.uri,
+                            playerId = players.first().playerId,
+                        )
                     } else {
-                        client.groupAndPlay(item, players.map { it.playerId })
+                        MusicAssistantClient(
+                            baseUrl = musicAssistantBaseUrl,
+                            token = musicAssistantToken,
+                        ).groupAndPlay(item, players.map { it.playerId })
                     }
                 }
             }.onSuccess {
