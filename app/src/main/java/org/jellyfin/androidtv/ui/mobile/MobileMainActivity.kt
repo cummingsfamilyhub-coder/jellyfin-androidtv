@@ -786,10 +786,18 @@ class MobileMainActivity : FragmentActivity() {
         lifecycleScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    MusicAssistantClient(
+                    val client = MusicAssistantClient(
                         baseUrl = musicAssistantBaseUrl,
                         token = musicAssistantToken,
-                    ).groupAndPlay(item, players.map { it.playerId })
+                    )
+                    if (
+                        players.size == 1 &&
+                        players.first().name.equals("This Device", ignoreCase = true)
+                    ) {
+                        client.playLocalWhenReady(item, players.first().playerId)
+                    } else {
+                        client.groupAndPlay(item, players.map { it.playerId })
+                    }
                 }
             }.onSuccess {
                 val destination = if (players.size == 1) {
