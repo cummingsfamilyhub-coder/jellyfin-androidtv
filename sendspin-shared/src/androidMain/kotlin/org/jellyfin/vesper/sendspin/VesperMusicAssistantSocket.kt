@@ -41,28 +41,30 @@ class VesperMusicAssistantSocket(
     private val json = Json { ignoreUnknownKeys = true }
     private var session: io.ktor.client.plugins.websocket.DefaultClientWebSocketSession? = null
 
-    suspend fun connect() = mutex.withLock {
-        if (session != null) return
-        require(token.isNotBlank()) { "Music Assistant token is missing." }
+    suspend fun connect() {
+        mutex.withLock {
+            if (session != null) return@withLock
+            require(token.isNotBlank()) { "Music Assistant token is missing." }
 
-        val wsUrl = websocketUrl(baseUrl)
-        val connected = client.webSocketSession { url(wsUrl) }
-        session = connected
+            val wsUrl = websocketUrl(baseUrl)
+            val connected = client.webSocketSession { url(wsUrl) }
+            session = connected
 
-        try {
-            awaitServerInfo(connected)
-            sendCommandLocked(
-                connected,
-                "auth",
-                buildJsonObject {
-                    put("token", JsonPrimitive(token))
-                    put("device_name", JsonPrimitive(deviceName))
-                },
-            )
-        } catch (error: Throwable) {
-            session = null
-            runCatching { connected.close() }
-            throw error
+            try {
+                awaitServerInfo(connected)
+                sendCommandLocked(
+                    connected,
+                    "auth",
+                    buildJsonObject {
+                        put("token", JsonPrimitive(token))
+                        put("device_name", JsonPrimitive(deviceName))
+                    },
+                )
+            } catch (error: Throwable) {
+                session = null
+                runCatching { connected.close() }
+                throw error
+            }
         }
     }
 
