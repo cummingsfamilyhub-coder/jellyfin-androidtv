@@ -112,11 +112,7 @@ class VesperMusicAssistantSocket(
     }
 
     override fun close() {
-        val active = session
         session = null
-        if (active != null) {
-            runCatching { active.cancel() }
-        }
         client.close()
     }
 
