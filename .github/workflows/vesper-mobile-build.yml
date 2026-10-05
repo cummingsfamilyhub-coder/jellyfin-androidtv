@@ -150,7 +150,11 @@ jobs:
       - name: Build mobile debug APK
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon assembleDebug
+          set +e
+          ./gradlew --no-daemon --console=plain assembleDebug > gradle-build.log 2>&1
+          STATUS=$?
+          tail -n 240 gradle-build.log
+          exit $STATUS
 
       - name: Collect APK
         run: |
