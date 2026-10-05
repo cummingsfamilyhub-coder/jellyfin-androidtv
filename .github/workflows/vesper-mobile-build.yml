@@ -12,7 +12,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # write is needed to publish the rolling "vesper-mobile-latest" release
+  contents: write
 
 concurrency:
   group: vesper-mobile-${{ github.ref }}
@@ -244,3 +245,22 @@ jobs:
           path: dist/Vesper-mobile-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+      # Publishes the verified APK to a rolling release with a fixed download URL:
+      # https://github.com/<owner>/<repo>/releases/download/vesper-mobile-latest/Vesper-mobile-debug.apk
+      # Only runs after every verification step above has passed.
+      - name: Publish rolling Vesper Mobile release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: vesper-mobile-latest
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          BUILT_AT="$(date -u '+%Y-%m-%d %H:%M UTC')"
+          # Replace the previous rolling release so the download URL never changes.
+          gh release delete "$RELEASE_TAG" --cleanup-tag --yes || true
+          gh release create "$RELEASE_TAG" dist/Vesper-mobile-debug.apk \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Vesper Mobile latest debug ($SHORT_SHA)" \
+            --notes "Branch ${GITHUB_REF_NAME}, commit ${GITHUB_SHA}, built ${BUILT_AT}."
