@@ -9,12 +9,14 @@ on:
       - ".github/workflows/vesper-mobile-build.yml"
       - "app/**"
       - "sendspin-shared/**"
-      - "VESPER.md"
-      - "VESPER_STATUS.md"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: vesper-mobile-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
