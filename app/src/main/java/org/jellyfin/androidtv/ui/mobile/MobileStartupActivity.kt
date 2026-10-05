@@ -39,7 +39,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.JellyfinApplication
 import org.jellyfin.androidtv.VesperServiceConfig
@@ -59,6 +61,7 @@ import org.jellyfin.androidtv.auth.repository.AuthenticationRepository
 import org.jellyfin.androidtv.auth.repository.ServerRepository
 import org.jellyfin.androidtv.auth.repository.ServerUserRepository
 import org.jellyfin.androidtv.auth.repository.SessionRepository
+import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.koin.android.ext.android.inject
@@ -91,12 +94,37 @@ class MobileStartupActivity : FragmentActivity() {
         val switchServerId = intent.getStringExtra(EXTRA_SWITCH_SERVER_ID)?.let(UUID::fromString)
         profileSwitchMode = intent.getBooleanExtra(EXTRA_PROFILE_SWITCH, false)
 
+        // Never leave the launcher with an empty Activity while session restoration
+        // waits on network I/O. This also makes a slow cold start visibly distinct
+        // from an app hang.
+        setContent { MobileStartupLoadingScreen() }
+
         lifecycleScope.launch {
-            // SessionInitializer restores in the background, but the mobile launcher can
-            // be created before that coroutine finishes. Explicitly await restoration here
-            // so a valid saved session never falls through to the login screen.
             if (switchServerId == null) {
-                sessionRepository.restoreSession(destroyOnly = false)
+                if (
+                    sessionRepository.currentSession.value != null &&
+                    userRepository.currentUser.value != null
+                ) {
+                    openHome()
+                    return@launch
+                }
+
+                // SessionInitializer normally starts restoration before the launcher.
+                // Give it a brief chance to publish that state and wait for the same
+                // restore instead of blindly queueing a second one behind its mutex.
+                repeat(10) {
+                    if (sessionRepository.state.value == SessionRepositoryState.RESTORING_SESSION) {
+                        return@repeat
+                    }
+                    delay(25)
+                }
+
+                if (sessionRepository.state.value == SessionRepositoryState.RESTORING_SESSION) {
+                    sessionRepository.state.first { it == SessionRepositoryState.READY }
+                } else {
+                    sessionRepository.restoreSession(destroyOnly = false)
+                }
+
                 if (
                     sessionRepository.currentSession.value != null &&
                     userRepository.currentUser.value != null
@@ -414,6 +442,35 @@ class MobileStartupActivity : FragmentActivity() {
     companion object {
         const val EXTRA_SWITCH_SERVER_ID = "switch_server_id"
         const val EXTRA_PROFILE_SWITCH = "profile_switch"
+    }
+}
+
+@Composable
+private fun MobileStartupLoadingScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF05080C)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            BasicText(
+                "Vesper",
+                style = TextStyle(
+                    color = Color(0xFFB89CFF),
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+            Spacer(Modifier.height(10.dp))
+            BasicText(
+                "Starting…",
+                style = TextStyle(
+                    color = Color(0xFF858E9A),
+                    fontSize = 13.sp,
+                ),
+            )
+        }
     }
 }
 
