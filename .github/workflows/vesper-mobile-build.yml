@@ -194,22 +194,22 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
 
-          EXPECTED_CERT="$(
-            keytool -list -v \
-              -keystore .github/vesper-debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-            | awk -F': ' '/SHA256:/ {print $2; exit}' \
-            | tr -d ':' \
-            | tr '[:upper:]' '[:lower:]'
-          )"
+          CERT_FILE="$(mktemp)"
+          keytool -exportcert \
+            -keystore .github/vesper-debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -file "$CERT_FILE" >/dev/null
 
+          EXPECTED_CERT="$(sha256sum "$CERT_FILE" | awk '{print $1}')"
           ACTUAL_CERT="$(
             "$APKSIGNER" verify --print-certs dist/Vesper-mobile-debug.apk \
-            | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}' \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest:[[:space:]]*//p' \
+            | head -n 1 \
             | tr -d ':' \
             | tr '[:upper:]' '[:lower:]'
           )"
+          rm -f "$CERT_FILE"
 
           echo "Expected signer SHA-256: $EXPECTED_CERT"
           echo "Actual signer SHA-256:   $ACTUAL_CERT"
