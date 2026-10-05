@@ -45,7 +45,6 @@ internal data class MaPlayer(
     val queueCurrentIndex: Int?,
     val canPrevious: Boolean,
     val canNext: Boolean,
-    val queueReady: Boolean,
 )
 
 internal data class MusicAssistantSnapshot(
@@ -157,33 +156,6 @@ internal class MusicAssistantClient(
                 .put("start_from_beginning", false)
         )
     }
-
-    fun playLocalWhenReady(item: MaMediaItem, playerId: String) {
-        val deadline = System.currentTimeMillis() + LOCAL_PLAYER_READY_TIMEOUT_MS
-        var lastError: Throwable? = null
-
-        while (System.currentTimeMillis() < deadline) {
-            val queueReady = commandArray("player_queues/all", JSONObject())
-                .any { it.optString("queue_id") == playerId }
-
-            if (queueReady) {
-                try {
-                    play(item, playerId)
-                    return
-                } catch (error: Throwable) {
-                    lastError = error
-                }
-            }
-
-            Thread.sleep(LOCAL_PLAYER_RETRY_DELAY_MS)
-        }
-
-        throw IllegalStateException(
-            lastError?.message ?: "This Device is still connecting to Music Assistant. Try again in a moment.",
-            lastError,
-        )
-    }
-
 
     fun approveSendspinPairing(pairingToken: String) {
         require(pairingToken.isNotBlank()) { "Sendspin pairing token is missing." }
@@ -413,7 +385,6 @@ internal class MusicAssistantClient(
             queueCurrentIndex = queueIndex,
             canPrevious = hasPrevious,
             canNext = hasNext,
-            queueReady = queue != null,
         )
     }
 
@@ -509,11 +480,6 @@ internal class MusicAssistantClient(
             }.getOrDefault(url)
         }
         return url
-    }
-
-    private companion object {
-        const val LOCAL_PLAYER_READY_TIMEOUT_MS = 10_000L
-        const val LOCAL_PLAYER_RETRY_DELAY_MS = 500L
     }
 
     private fun playerPriority(name: String): Int {
