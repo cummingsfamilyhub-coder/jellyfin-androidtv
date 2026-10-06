@@ -890,18 +890,24 @@ class MobileMainActivity : FragmentActivity() {
         refreshed: List<MaPlayer>,
     ): List<MaPlayer> = refreshed.map { player ->
         val prior = previous.firstOrNull { it.playerId == player.playerId }
-        if (
-            player.playbackState == "paused" &&
-            player.currentTitle.isNullOrBlank() &&
-            !prior?.currentTitle.isNullOrBlank()
-        ) {
+        val preserveParkedSession =
+            prior?.playbackState == "paused" &&
+                player.playbackState != "playing" &&
+                !player.queueEnded &&
+                player.queueItemCount > 0
+        val needsMetadata = player.currentTitle.isNullOrBlank() && !prior?.currentTitle.isNullOrBlank()
+
+        if (preserveParkedSession || (player.playbackState == "paused" && needsMetadata)) {
             player.copy(
-                currentTitle = prior?.currentTitle,
-                currentArtist = prior?.currentArtist,
-                currentImageUrl = prior?.currentImageUrl,
-                currentMediaType = prior?.currentMediaType,
+                playbackState = "paused",
+                currentTitle = player.currentTitle ?: prior?.currentTitle,
+                currentArtist = player.currentArtist ?: prior?.currentArtist,
+                currentImageUrl = player.currentImageUrl ?: prior?.currentImageUrl,
+                currentMediaType = player.currentMediaType ?: prior?.currentMediaType,
                 queueItemCount = maxOf(player.queueItemCount, prior?.queueItemCount ?: 0),
                 queueCurrentIndex = player.queueCurrentIndex ?: prior?.queueCurrentIndex,
+                queueResumePosition = maxOf(player.queueResumePosition, prior?.queueResumePosition ?: 0),
+                queueElapsedTime = maxOf(player.queueElapsedTime, prior?.queueElapsedTime ?: 0),
                 canPrevious = player.canPrevious || (prior?.canPrevious == true),
                 canNext = player.canNext || (prior?.canNext == true),
             )
@@ -1328,7 +1334,7 @@ private fun VesperMobile(
     onSettings: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
-    var showNowPlaying by remember { mutableStateOf(false) }
+    var nowPlayingQueueId by remember { mutableStateOf<String?>(null) }
     var nowPlayingRoomsPlayerId by remember { mutableStateOf<String?>(null) }
 
     BoxWithConstraints(
@@ -1465,11 +1471,13 @@ private fun VesperMobile(
                 )
             }
 
-            if (showPersistentMiniPlayer) persistentMusicPlayer?.let { player ->
+            if (showPersistentMiniPlayer && musicSessions.isNotEmpty()) {
                 VesperMiniPlayer(
-                    player = player,
-                    onOpen = { showNowPlaying = true },
-                    onControl = { action ->
+                    players = musicSessions,
+                    onOpen = { player ->
+                        nowPlayingQueueId = player.queueId
+                    },
+                    onControl = { player, action ->
                         onControlMusic(player, action)
                     },
                     modifier = Modifier
@@ -1484,11 +1492,11 @@ private fun VesperMobile(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
 
-            if (showNowPlaying && musicSessions.isNotEmpty()) {
+            if (nowPlayingQueueId != null && musicSessions.isNotEmpty()) {
                 VesperNowPlaying(
                     players = musicSessions,
-                    initialPlayerId = persistentMusicPlayer?.playerId,
-                    onDismiss = { showNowPlaying = false },
+                    initialQueueId = nowPlayingQueueId,
+                    onDismiss = { nowPlayingQueueId = null },
                     onControl = { player, action ->
                         onControlMusic(player, action)
                     },
@@ -1517,49 +1525,46 @@ private fun VesperMobile(
 }
 
 private fun activeMusicSessions(players: List<MaPlayer>): List<MaPlayer> {
-    val active = players.filter {
+    val candidates = players.filter {
         it.playbackState in setOf("playing", "paused") &&
             !it.currentTitle.isNullOrBlank()
     }
-    if (active.isEmpty()) return emptyList()
+    if (candidates.isEmpty()) return emptyList()
 
-    // Synced children are represented by their group/leader. If MA has not
-    // exposed a leader yet, fall back to the active children rather than
-    // hiding playback completely.
-    val leaders = active.filter { it.syncedTo == null }
-    val candidates = if (leaders.isNotEmpty()) leaders else active
-    val ordered = candidates.sortedWith(
-        compareBy<MaPlayer> {
-            if (it.name.equals("This Device", ignoreCase = true)) 0 else 1
-        }.thenBy { it.name.lowercase() }
-    )
-
-    val sessions = mutableListOf<MaPlayer>()
-    val claimedIds = mutableSetOf<String>()
-    ordered.forEach { player ->
-        val memberIds = if (player.type == "group") {
-            player.groupMembers.toMutableSet()
-        } else {
-            (player.groupMembers + player.playerId).toMutableSet()
-        }.apply {
-            add(player.playerId)
-            player.activeGroup?.let(::add)
+    // A Music Assistant queue is the playback session. Synced/grouped players
+    // can all point at the same queue, while two rooms playing different media
+    // have different queue ids. Build exactly one swipe page per queue.
+    return candidates
+        .groupBy { it.queueId }
+        .values
+        .map { queuePlayers ->
+            queuePlayers.firstOrNull { it.type == "group" }
+                ?: queuePlayers.firstOrNull { it.syncedTo == null }
+                ?: queuePlayers.first()
         }
-
-        if (memberIds.any { it in claimedIds }) return@forEach
-        sessions += player
-        claimedIds += memberIds
-    }
-    return sessions
+        .sortedWith(
+            compareBy<MaPlayer> {
+                if (it.name.equals("This Device", ignoreCase = true)) 0 else 1
+            }.thenByDescending { it.playbackState == "playing" }
+                .thenBy { it.name.lowercase() }
+        )
 }
 
 @Composable
 private fun VesperMiniPlayer(
-    player: MaPlayer,
-    onOpen: () -> Unit,
-    onControl: (MusicPlayerAction) -> Unit,
+    players: List<MaPlayer>,
+    onOpen: (MaPlayer) -> Unit,
+    onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (players.isEmpty()) return
+
+    val queueIds = players.map { it.queueId }
+    var currentIndex by remember(queueIds) { mutableStateOf(0) }
+    val safeIndex = currentIndex.coerceIn(0, players.lastIndex)
+    if (safeIndex != currentIndex) currentIndex = safeIndex
+    val player = players[safeIndex]
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -1567,7 +1572,25 @@ private fun VesperMiniPlayer(
             .clip(RoundedCornerShape(22.dp))
             .background(Color(0xF01A1B28))
             .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
-            .clickable(onClick = onOpen)
+            .pointerInput(queueIds, currentIndex) {
+                var dragDistance = 0f
+                val threshold = 44.dp.toPx()
+                detectHorizontalDragGestures(
+                    onDragStart = { dragDistance = 0f },
+                    onHorizontalDrag = { _, dragAmount -> dragDistance += dragAmount },
+                    onDragEnd = {
+                        when {
+                            dragDistance <= -threshold && currentIndex < players.lastIndex ->
+                                currentIndex += 1
+                            dragDistance >= threshold && currentIndex > 0 ->
+                                currentIndex -= 1
+                        }
+                        dragDistance = 0f
+                    },
+                    onDragCancel = { dragDistance = 0f },
+                )
+            }
+            .clickable { onOpen(player) }
             .padding(horizontal = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1602,10 +1625,11 @@ private fun VesperMiniPlayer(
             )
             Spacer(Modifier.height(2.dp))
             BasicText(
-                listOfNotNull(
-                    player.currentArtist,
-                    player.name,
-                ).joinToString(" · "),
+                buildList {
+                    player.currentArtist?.takeIf { it.isNotBlank() }?.let(::add)
+                    add(player.name)
+                    if (players.size > 1) add("${safeIndex + 1}/${players.size}")
+                }.joinToString(" · "),
                 style = TextStyle(color = Color(0xFF8E97A4), fontSize = 9.sp),
                 maxLines = 1,
             )
@@ -1619,14 +1643,14 @@ private fun VesperMiniPlayer(
                 label = "⏮",
                 enabled = player.canPrevious,
                 compact = true,
-            ) { onControl(MusicPlayerAction.PREVIOUS) }
+            ) { onControl(player, MusicPlayerAction.PREVIOUS) }
 
             Box(
                 modifier = Modifier
                     .size(42.dp)
                     .clip(RoundedCornerShape(21.dp))
                     .background(Color(0xFFEAF4FB))
-                    .clickable { onControl(MusicPlayerAction.PLAY_PAUSE) },
+                    .clickable { onControl(player, MusicPlayerAction.PLAY_PAUSE) },
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(
@@ -1643,7 +1667,7 @@ private fun VesperMiniPlayer(
                 label = "⏭",
                 enabled = player.canNext,
                 compact = true,
-            ) { onControl(MusicPlayerAction.NEXT) }
+            ) { onControl(player, MusicPlayerAction.NEXT) }
         }
     }
 }
@@ -1651,17 +1675,17 @@ private fun VesperMiniPlayer(
 @Composable
 private fun VesperNowPlaying(
     players: List<MaPlayer>,
-    initialPlayerId: String?,
+    initialQueueId: String?,
     onDismiss: () -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onRooms: (MaPlayer) -> Unit,
 ) {
     if (players.isEmpty()) return
 
-    val playerIds = players.map { it.playerId }
-    var currentIndex by remember(playerIds, initialPlayerId) {
+    val queueIds = players.map { it.queueId }
+    var currentIndex by remember(queueIds, initialQueueId) {
         mutableStateOf(
-            players.indexOfFirst { it.playerId == initialPlayerId }
+            players.indexOfFirst { it.queueId == initialQueueId }
                 .takeIf { it >= 0 }
                 ?: 0
         )
@@ -1699,7 +1723,7 @@ private fun VesperNowPlaying(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(playerIds, currentIndex) {
+                    .pointerInput(queueIds, currentIndex) {
                         var dragDistance = 0f
                         val threshold = 64.dp.toPx()
                         detectHorizontalDragGestures(
