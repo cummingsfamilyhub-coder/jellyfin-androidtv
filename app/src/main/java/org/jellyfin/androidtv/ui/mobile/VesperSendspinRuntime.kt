@@ -100,16 +100,16 @@ internal class VesperSendspinRuntime(
         )
     }
 
-    suspend fun resume(playerId: String) = playerCommand("play", playerId)
-    suspend fun pause(playerId: String) = playerCommand("pause", playerId)
-    suspend fun next(playerId: String) = playerCommand("next", playerId)
-    suspend fun previous(playerId: String) = playerCommand("previous", playerId)
+    suspend fun resume(queueId: String) = queueCommand("resume", queueId)
+    suspend fun pause(queueId: String) = queueCommand("pause", queueId)
+    suspend fun next(queueId: String) = queueCommand("next", queueId)
+    suspend fun previous(queueId: String) = queueCommand("previous", queueId)
 
-    private suspend fun playerCommand(command: String, playerId: String) {
+    private suspend fun queueCommand(command: String, queueId: String) {
         controlSocket.command(
-            "players/cmd/$command",
+            "player_queues/$command",
             buildJsonObject {
-                put("player_id", JsonPrimitive(playerId))
+                put("queue_id", JsonPrimitive(queueId))
             },
         )
     }
