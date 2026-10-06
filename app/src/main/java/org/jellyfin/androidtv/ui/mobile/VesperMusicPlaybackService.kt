@@ -162,13 +162,13 @@ internal class VesperMusicPlaybackService : Service() {
 
     private suspend fun refreshPlayer() {
         val client = musicAssistantClient ?: return
-        val snapshot = runCatching {
-            withContext(Dispatchers.IO) { client.loadSnapshot() }
+        val players = runCatching {
+            withContext(Dispatchers.IO) { client.loadPlayers() }
         }.getOrNull() ?: return
 
         val playerId = (runtime?.state?.value as? PlayerState.Connected)?.playerId ?: currentPlayerId
-        val player = playerId?.let { id -> snapshot.players.firstOrNull { it.playerId == id } }
-            ?: snapshot.players.firstOrNull { it.name == DEVICE_NAME }
+        val player = playerId?.let { id -> players.firstOrNull { it.playerId == id } }
+            ?: players.firstOrNull { it.name == DEVICE_NAME }
 
         if (player != null) currentPlayerId = player.playerId
         val changed = player != currentPlayer
@@ -262,7 +262,7 @@ internal class VesperMusicPlaybackService : Service() {
         }
         val discovered = withContext(Dispatchers.IO) {
             runCatching {
-                client.loadSnapshot().players.firstOrNull { it.name == DEVICE_NAME }?.playerId
+                client.loadPlayers().firstOrNull { it.name == DEVICE_NAME }?.playerId
             }.getOrNull()
         }
         currentPlayerId = discovered

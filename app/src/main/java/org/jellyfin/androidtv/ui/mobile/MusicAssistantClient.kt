@@ -112,10 +112,23 @@ internal class MusicAssistantClient(
                 .put("order_by", "name")
         ).mapNotNull(::parseMediaItem)
 
+        val players = loadPlayers()
+
+        return MusicAssistantSnapshot(
+            recentlyPlayed = recent,
+            artists = artists,
+            albums = albums,
+            playlists = playlists,
+            radios = radios,
+            players = players,
+        )
+    }
+
+    fun loadPlayers(): List<MaPlayer> {
         val queues = commandArray("player_queues/all", JSONObject())
             .associateBy { it.optString("queue_id") }
 
-        val players = commandArray("players/all", JSONObject())
+        return commandArray("players/all", JSONObject())
             .mapNotNull { playerJson ->
                 val playerId = playerJson.optString("player_id")
                 val activeSource = playerJson.optString("active_source").takeIf { it.isNotBlank() }
@@ -135,15 +148,6 @@ internal class MusicAssistantClient(
                 compareBy<MaPlayer> { playerPriority(it.name) }
                     .thenBy { it.name.lowercase() }
             )
-
-        return MusicAssistantSnapshot(
-            recentlyPlayed = recent,
-            artists = artists,
-            albums = albums,
-            playlists = playlists,
-            radios = radios,
-            players = players,
-        )
     }
 
     fun play(item: MaMediaItem, playerId: String) {

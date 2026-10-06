@@ -136,6 +136,8 @@ class MobileMainActivity : FragmentActivity() {
     private var showPersistentMiniPlayer by mutableStateOf(true)
     private val hydratedTabs = mutableSetOf<MobileTab>()
     private val loadingTabs = mutableSetOf<MobileTab>()
+    private var musicPlayerRefreshInFlight = false
+    private var musicPlayerRefreshQueued = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -212,7 +214,7 @@ class MobileMainActivity : FragmentActivity() {
 
         lifecycleScope.launch {
             VesperMusicPlaybackService.playerRefreshEvents.collect {
-                loadMusic()
+                refreshMusicPlayers()
             }
         }
 
@@ -758,7 +760,12 @@ class MobileMainActivity : FragmentActivity() {
             return
         }
 
-        musicState = musicState.copy(loading = true, error = null)
+        // Only replace the Music UI with the loading panel on the first load.
+        // Subsequent full refreshes keep the last good snapshot visible.
+        if (!musicState.loaded) {
+            musicState = musicState.copy(loading = true, error = null)
+        }
+
         lifecycleScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -773,9 +780,56 @@ class MobileMainActivity : FragmentActivity() {
                     snapshot = snapshot,
                 )
             }.onFailure { error ->
-                musicState = MusicUiState(
-                    error = error.message ?: "Couldn't load Music Assistant."
-                )
+                musicState = if (musicState.loaded) {
+                    // A transient MA failure must not throw away a usable screen.
+                    musicState.copy(loading = false, error = null)
+                } else {
+                    MusicUiState(
+                        error = error.message ?: "Couldn't load Music Assistant."
+                    )
+                }
+            }
+        }
+    }
+
+    private fun refreshMusicPlayers() {
+        if (
+            musicAssistantBaseUrl.isBlank() ||
+            musicAssistantToken.isBlank() ||
+            !musicState.loaded
+        ) return
+
+        if (musicPlayerRefreshInFlight) {
+            musicPlayerRefreshQueued = true
+            return
+        }
+
+        musicPlayerRefreshInFlight = true
+        lifecycleScope.launch {
+            try {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        MusicAssistantClient(
+                            baseUrl = musicAssistantBaseUrl,
+                            token = musicAssistantToken,
+                        ).loadPlayers()
+                    }
+                }.onSuccess { players ->
+                    musicState = musicState.copy(
+                        loading = false,
+                        loaded = true,
+                        error = null,
+                        snapshot = musicState.snapshot.copy(players = players),
+                    )
+                }
+                // Player refreshes are best-effort. Keep the last good snapshot
+                // on any transient MA/HTTP failure and retry on the next event.
+            } finally {
+                musicPlayerRefreshInFlight = false
+                if (musicPlayerRefreshQueued) {
+                    musicPlayerRefreshQueued = false
+                    refreshMusicPlayers()
+                }
             }
         }
     }
@@ -813,7 +867,7 @@ class MobileMainActivity : FragmentActivity() {
                     Toast.LENGTH_SHORT,
                 ).show()
                 delay(700)
-                loadMusic()
+                refreshMusicPlayers()
             }.onFailure { error ->
                 Toast.makeText(
                     this@MobileMainActivity,
@@ -848,7 +902,7 @@ class MobileMainActivity : FragmentActivity() {
                 }
             }.onSuccess {
                 delay(350)
-                loadMusic()
+                refreshMusicPlayers()
             }.onFailure { error ->
                 Toast.makeText(
                     this@MobileMainActivity,
@@ -893,7 +947,7 @@ class MobileMainActivity : FragmentActivity() {
                 }
             }.onSuccess {
                 delay(500)
-                loadMusic()
+                refreshMusicPlayers()
             }.onFailure { error ->
                 Toast.makeText(
                     this@MobileMainActivity,
@@ -2140,6 +2194,10 @@ private fun MusicHero(
     onOpenPlayer: (MaPlayer) -> Unit,
 ) {
     val active = snapshot.players.firstOrNull {
+        it.name.equals("This Device", ignoreCase = true) &&
+            it.playbackState in setOf("playing", "paused") &&
+            !it.currentTitle.isNullOrBlank()
+    } ?: snapshot.players.firstOrNull {
         it.playbackState in setOf("playing", "paused") &&
             !it.currentTitle.isNullOrBlank() &&
             it.syncedTo == null
