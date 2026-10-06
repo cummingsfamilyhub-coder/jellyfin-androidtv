@@ -11,10 +11,10 @@ fun OptionsScreen.aboutCategory() = category {
 	setTitle(R.string.pref_about_title)
 
 	link {
-		// Hardcoded strings for troubleshooting purposes
-		title = "Jellyfin app version"
-		content = "jellyfin-androidtv ${BuildConfig.VERSION_NAME} ${BuildConfig.BUILD_TYPE}"
-		icon = R.drawable.ic_jellyfin
+		// Vesper-facing build details; upstream attribution remains in Licenses.
+		title = "Vesper app version"
+		content = "Vesper ${BuildConfig.VERSION_NAME} ${BuildConfig.BUILD_TYPE}"
+		icon = R.drawable.ic_settings
 	}
 
 	link {
