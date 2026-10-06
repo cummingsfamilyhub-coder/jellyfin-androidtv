@@ -1760,7 +1760,7 @@ private fun VesperNowPlaying(
                             .clickable(onClick = onDismiss),
                         contentAlignment = Alignment.Center,
                     ) {
-                        BasicText("↓", style = TextStyle(color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold))
+                        BasicText("×", style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.SemiBold))
                     }
 
                     Spacer(Modifier.weight(1f))
@@ -5399,7 +5399,7 @@ private fun SearchBrowse(
             .onSuccess { localSearchResults = it }
             .onFailure {
                 localSearchResults = emptyList()
-                localSearchError = it.message ?: "Couldn't reach Jellyfin."
+                localSearchError = it.message ?: "Couldn't reach your media server."
             }
         localSearchLoading = false
 
@@ -5408,7 +5408,7 @@ private fun SearchBrowse(
                 .onSuccess { seerrResults = it }
                 .onFailure {
                     seerrResults = emptyList()
-                    seerrError = it.message ?: "Couldn't reach Seerr."
+                    seerrError = it.message ?: "Couldn't reach media requests."
                 }
         } else {
             seerrResults = emptyList()
@@ -5437,7 +5437,7 @@ private fun SearchBrowse(
         ) {
             if (query.isBlank()) {
                 BasicText(
-                    if (seerrConfigured) "Search your library and Seerr" else "Movies and TV shows",
+                    "Search Media",
                     style = TextStyle(color = Color(0xFF657482), fontSize = 16.sp),
                 )
             }
@@ -5458,7 +5458,7 @@ private fun SearchBrowse(
                 start = 16.dp,
                 end = 16.dp,
                 top = 10.dp,
-                bottom = 124.dp,
+                bottom = 220.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(11.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -5488,9 +5488,9 @@ private fun SearchBrowse(
 
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     SearchSectionHeader(
-                        title = "Request with Seerr",
+                        title = "Request Media",
                         subtitle = when {
-                            !seerrConfigured -> "Connect Seerr in Settings"
+                            !seerrConfigured -> "Media requests need setup"
                             seerrLoading -> "Searching…"
                             seerrError != null -> seerrError.orEmpty()
                             remoteResults.isEmpty() && query.trim().length >= 2 -> "No additional matches"
@@ -5592,7 +5592,7 @@ private fun SeerrMediaCard(
                     .padding(horizontal = 7.dp, vertical = 4.dp),
             ) {
                 BasicText(
-                    "SEERR",
+                    "REQUEST",
                     style = TextStyle(
                         color = Color(0xFFBDEBFF),
                         fontSize = 9.sp,
