@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
 import org.jellyfin.androidtv.ui.AsyncImageView
 import org.jellyfin.androidtv.util.BlurHashDecoder
+import kotlin.time.Duration.Companion.milliseconds
 
 private data class AsyncImageState(
 	val url: String?,
@@ -30,6 +31,7 @@ fun AsyncImage(
 	aspectRatio: Float = 1f,
 	blurHashResolution: Int = 32,
 	scaleType: ImageView.ScaleType? = null,
+	crossFadeDurationMs: Int? = null,
 ) {
 	// Only the important properties are added to AsyncImageState
 	var state by remember { mutableStateOf<AsyncImageState?>(null) }
@@ -40,6 +42,9 @@ fun AsyncImage(
 			AsyncImageView(context).also { view ->
 				view.adjustViewBounds = true
 				view.scaleType = scaleType ?: ImageView.ScaleType.FIT_CENTER
+				crossFadeDurationMs?.let { duration ->
+					view.crossFadeDuration = duration.milliseconds
+				}
 			}
 		},
 		update = { view ->
