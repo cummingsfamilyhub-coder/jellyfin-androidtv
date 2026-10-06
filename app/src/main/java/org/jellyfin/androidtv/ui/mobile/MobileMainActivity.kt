@@ -946,12 +946,12 @@ class MobileMainActivity : FragmentActivity() {
                         token = musicAssistantToken,
                     )
                     when (action) {
-                        MusicPlayerAction.PREVIOUS -> client.previous(player.playerId)
+                        MusicPlayerAction.PREVIOUS -> client.previous(player.queueId)
                         MusicPlayerAction.PLAY_PAUSE -> {
-                            if (wasPlaying) client.pause(player.playerId)
-                            else client.resume(player.playerId)
+                            if (wasPlaying) client.pause(player.queueId)
+                            else client.resume(player.queueId)
                         }
-                        MusicPlayerAction.NEXT -> client.next(player.playerId)
+                        MusicPlayerAction.NEXT -> client.next(player.queueId)
                         MusicPlayerAction.VOLUME_DOWN -> player.volumeLevel?.let {
                             client.setVolume(player.playerId, it - 5)
                         }
