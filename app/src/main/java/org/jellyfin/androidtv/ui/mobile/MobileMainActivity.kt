@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.VesperServiceConfig
 import androidx.compose.ui.res.painterResource
@@ -57,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -819,7 +821,12 @@ class MobileMainActivity : FragmentActivity() {
                         loading = false,
                         loaded = true,
                         error = null,
-                        snapshot = musicState.snapshot.copy(players = players),
+                        snapshot = musicState.snapshot.copy(
+                            players = preservePausedPlayerMetadata(
+                                previous = musicState.snapshot.players,
+                                refreshed = players,
+                            )
+                        ),
                     )
                 }
                 // Player refreshes are best-effort. Keep the last good snapshot
@@ -878,8 +885,58 @@ class MobileMainActivity : FragmentActivity() {
         }
     }
 
+    private fun preservePausedPlayerMetadata(
+        previous: List<MaPlayer>,
+        refreshed: List<MaPlayer>,
+    ): List<MaPlayer> = refreshed.map { player ->
+        val prior = previous.firstOrNull { it.playerId == player.playerId }
+        if (
+            player.playbackState == "paused" &&
+            player.currentTitle.isNullOrBlank() &&
+            !prior?.currentTitle.isNullOrBlank()
+        ) {
+            player.copy(
+                currentTitle = prior?.currentTitle,
+                currentArtist = prior?.currentArtist,
+                currentImageUrl = prior?.currentImageUrl,
+                currentMediaType = prior?.currentMediaType,
+                queueItemCount = maxOf(player.queueItemCount, prior?.queueItemCount ?: 0),
+                queueCurrentIndex = player.queueCurrentIndex ?: prior?.queueCurrentIndex,
+                canPrevious = player.canPrevious || (prior?.canPrevious == true),
+                canNext = player.canNext || (prior?.canNext == true),
+            )
+        } else {
+            player
+        }
+    }
+
+    private fun setMusicPlayerPlaybackState(playerId: String, playbackState: String) {
+        musicState = musicState.copy(
+            snapshot = musicState.snapshot.copy(
+                players = musicState.snapshot.players.map { player ->
+                    if (player.playerId == playerId) {
+                        player.copy(playbackState = playbackState)
+                    } else {
+                        player
+                    }
+                }
+            )
+        )
+    }
+
     private fun controlMusic(player: MaPlayer, action: MusicPlayerAction) {
         if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+
+        val wasPlaying = player.playbackState == "playing"
+        if (action == MusicPlayerAction.PLAY_PAUSE) {
+            // Pause is a state transition, not the end of a session. Update the
+            // visible player immediately so the mini-player/Now Playing cannot
+            // disappear while Music Assistant catches up.
+            setMusicPlayerPlaybackState(
+                playerId = player.playerId,
+                playbackState = if (wasPlaying) "paused" else "playing",
+            )
+        }
 
         lifecycleScope.launch {
             runCatching {
@@ -890,7 +947,10 @@ class MobileMainActivity : FragmentActivity() {
                     )
                     when (action) {
                         MusicPlayerAction.PREVIOUS -> client.previous(player.playerId)
-                        MusicPlayerAction.PLAY_PAUSE -> client.playPause(player.playerId)
+                        MusicPlayerAction.PLAY_PAUSE -> {
+                            if (wasPlaying) client.pause(player.playerId)
+                            else client.resume(player.playerId)
+                        }
                         MusicPlayerAction.NEXT -> client.next(player.playerId)
                         MusicPlayerAction.VOLUME_DOWN -> player.volumeLevel?.let {
                             client.setVolume(player.playerId, it - 5)
@@ -904,6 +964,7 @@ class MobileMainActivity : FragmentActivity() {
                 delay(350)
                 refreshMusicPlayers()
             }.onFailure { error ->
+                refreshMusicPlayers()
                 Toast.makeText(
                     this@MobileMainActivity,
                     error.message ?: "Couldn't control playback.",
@@ -1268,7 +1329,7 @@ private fun VesperMobile(
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
     var showNowPlaying by remember { mutableStateOf(false) }
-    var showNowPlayingRooms by remember { mutableStateOf(false) }
+    var nowPlayingRoomsPlayerId by remember { mutableStateOf<String?>(null) }
 
     BoxWithConstraints(
         Modifier
@@ -1306,18 +1367,8 @@ private fun VesperMobile(
                 onTabSelected(destination)
             }
 
-            val persistentMusicPlayer = musicState.snapshot.players.firstOrNull {
-                it.name.equals("This Device", ignoreCase = true) &&
-                    it.playbackState in setOf("playing", "paused") &&
-                    !it.currentTitle.isNullOrBlank()
-            } ?: musicState.snapshot.players.firstOrNull {
-                it.playbackState in setOf("playing", "paused") &&
-                    !it.currentTitle.isNullOrBlank() &&
-                    it.syncedTo == null
-            } ?: musicState.snapshot.players.firstOrNull {
-                it.playbackState in setOf("playing", "paused") &&
-                    !it.currentTitle.isNullOrBlank()
-            }
+            val musicSessions = activeMusicSessions(musicState.snapshot.players)
+            val persistentMusicPlayer = musicSessions.firstOrNull()
 
             when (tab) {
                 MobileTab.HOME -> MobileHome(
@@ -1433,31 +1484,73 @@ private fun VesperMobile(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
 
-            if (showNowPlaying && persistentMusicPlayer != null) {
+            if (showNowPlaying && musicSessions.isNotEmpty()) {
                 VesperNowPlaying(
-                    player = persistentMusicPlayer,
+                    players = musicSessions,
+                    initialPlayerId = persistentMusicPlayer?.playerId,
                     onDismiss = { showNowPlaying = false },
-                    onControl = { action ->
-                        onControlMusic(persistentMusicPlayer, action)
+                    onControl = { player, action ->
+                        onControlMusic(player, action)
                     },
-                    onRooms = { showNowPlayingRooms = true },
+                    onRooms = { player ->
+                        nowPlayingRoomsPlayerId = player.playerId
+                    },
                 )
             }
 
-            if (showNowPlayingRooms && persistentMusicPlayer != null) {
-                MusicGroupManager(
-                    player = persistentMusicPlayer,
-                    players = musicState.snapshot.players,
-                    onDismiss = { showNowPlayingRooms = false },
-                    onSave = { selectedIds ->
-                        showNowPlayingRooms = false
-                        onUpdateMusicGroup(persistentMusicPlayer, selectedIds)
-                    },
-                )
+            nowPlayingRoomsPlayerId?.let { playerId ->
+                musicState.snapshot.players.firstOrNull { it.playerId == playerId }?.let { player ->
+                    MusicGroupManager(
+                        player = player,
+                        players = musicState.snapshot.players,
+                        onDismiss = { nowPlayingRoomsPlayerId = null },
+                        onSave = { selectedIds ->
+                            nowPlayingRoomsPlayerId = null
+                            onUpdateMusicGroup(player, selectedIds)
+                        },
+                    )
+                }
             }
         }
 
     }
+}
+
+private fun activeMusicSessions(players: List<MaPlayer>): List<MaPlayer> {
+    val active = players.filter {
+        it.playbackState in setOf("playing", "paused") &&
+            !it.currentTitle.isNullOrBlank()
+    }
+    if (active.isEmpty()) return emptyList()
+
+    // Synced children are represented by their group/leader. If MA has not
+    // exposed a leader yet, fall back to the active children rather than
+    // hiding playback completely.
+    val leaders = active.filter { it.syncedTo == null }
+    val candidates = if (leaders.isNotEmpty()) leaders else active
+    val ordered = candidates.sortedWith(
+        compareBy<MaPlayer> {
+            if (it.name.equals("This Device", ignoreCase = true)) 0 else 1
+        }.thenBy { it.name.lowercase() }
+    )
+
+    val sessions = mutableListOf<MaPlayer>()
+    val claimedIds = mutableSetOf<String>()
+    ordered.forEach { player ->
+        val memberIds = if (player.type == "group") {
+            player.groupMembers.toMutableSet()
+        } else {
+            (player.groupMembers + player.playerId).toMutableSet()
+        }.apply {
+            add(player.playerId)
+            player.activeGroup?.let(::add)
+        }
+
+        if (memberIds.any { it in claimedIds }) return@forEach
+        sessions += player
+        claimedIds += memberIds
+    }
+    return sessions
 }
 
 @Composable
@@ -1557,11 +1650,26 @@ private fun VesperMiniPlayer(
 
 @Composable
 private fun VesperNowPlaying(
-    player: MaPlayer,
+    players: List<MaPlayer>,
+    initialPlayerId: String?,
     onDismiss: () -> Unit,
-    onControl: (MusicPlayerAction) -> Unit,
-    onRooms: () -> Unit,
+    onControl: (MaPlayer, MusicPlayerAction) -> Unit,
+    onRooms: (MaPlayer) -> Unit,
 ) {
+    if (players.isEmpty()) return
+
+    val playerIds = players.map { it.playerId }
+    var currentIndex by remember(playerIds, initialPlayerId) {
+        mutableStateOf(
+            players.indexOfFirst { it.playerId == initialPlayerId }
+                .takeIf { it >= 0 }
+                ?: 0
+        )
+    }
+    val safeIndex = currentIndex.coerceIn(0, players.lastIndex)
+    if (safeIndex != currentIndex) currentIndex = safeIndex
+    val player = players[safeIndex]
+
     Popup(
         alignment = Alignment.Center,
         onDismissRequest = onDismiss,
@@ -1581,9 +1689,36 @@ private fun VesperNowPlaying(
             )
             val largeGap = if (compactHeight) 12.dp else 18.dp
             val smallGap = if (compactHeight) 6.dp else 8.dp
+            val roomCount = if (player.type == "group") {
+                player.groupMembers.distinct().size
+            } else {
+                (player.groupMembers + player.playerId).distinct().size
+            }.coerceAtLeast(1)
+            val roomLabel = if (roomCount > 1) "$roomCount rooms" else player.name
 
             Column(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(playerIds, currentIndex) {
+                        var dragDistance = 0f
+                        val threshold = 64.dp.toPx()
+                        detectHorizontalDragGestures(
+                            onDragStart = { dragDistance = 0f },
+                            onHorizontalDrag = { _, dragAmount ->
+                                dragDistance += dragAmount
+                            },
+                            onDragEnd = {
+                                when {
+                                    dragDistance <= -threshold && currentIndex < players.lastIndex ->
+                                        currentIndex += 1
+                                    dragDistance >= threshold && currentIndex > 0 ->
+                                        currentIndex -= 1
+                                }
+                                dragDistance = 0f
+                            },
+                            onDragCancel = { dragDistance = 0f },
+                        )
+                    },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(
@@ -1603,18 +1738,49 @@ private fun VesperNowPlaying(
 
                     Spacer(Modifier.weight(1f))
 
-                    BasicText(
-                        "NOW PLAYING",
-                        style = TextStyle(
-                            color = Color(0xFFA98CFF),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.8.sp,
-                        ),
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        BasicText(
+                            "NOW PLAYING",
+                            style = TextStyle(
+                                color = Color(0xFFA98CFF),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.8.sp,
+                            ),
+                        )
+                        if (players.size > 1) {
+                            Spacer(Modifier.height(4.dp))
+                            BasicText(
+                                "$roomLabel  ·  ${safeIndex + 1} of ${players.size}",
+                                style = TextStyle(color = Color(0xFF7F8793), fontSize = 9.sp),
+                                maxLines = 1,
+                            )
+                        }
+                    }
 
                     Spacer(Modifier.weight(1f))
                     Spacer(Modifier.width(42.dp))
+                }
+
+                if (players.size > 1) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        players.indices.forEach { index ->
+                            Box(
+                                modifier = Modifier
+                                    .width(if (index == safeIndex) 18.dp else 6.dp)
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(
+                                        if (index == safeIndex) Color(0xFFA98CFF)
+                                        else Color(0x445F6670)
+                                    )
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(largeGap))
@@ -1674,6 +1840,7 @@ private fun VesperNowPlaying(
 
                 val queueSummary = when {
                     player.currentMediaType in setOf("radio", "audio_source") -> "Live"
+                    player.playbackState == "paused" -> "Paused"
                     player.queueItemCount > 0 && player.queueCurrentIndex != null ->
                         "Track ${player.queueCurrentIndex + 1} of ${player.queueItemCount}"
                     else -> "Playing"
@@ -1689,7 +1856,7 @@ private fun VesperNowPlaying(
                 ) {
                     Column(Modifier.weight(1f)) {
                         BasicText(
-                            player.name,
+                            roomLabel,
                             style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
                             maxLines = 1,
                         )
@@ -1699,7 +1866,6 @@ private fun VesperNowPlaying(
                             style = TextStyle(color = Color(0xFF8A93A1), fontSize = 10.sp),
                         )
                     }
-
                 }
 
                 Spacer(Modifier.height(largeGap))
@@ -1712,7 +1878,7 @@ private fun VesperNowPlaying(
                     MusicCircleButton(
                         label = "⏮",
                         enabled = player.canPrevious,
-                    ) { onControl(MusicPlayerAction.PREVIOUS) }
+                    ) { onControl(player, MusicPlayerAction.PREVIOUS) }
 
                     Spacer(Modifier.width(22.dp))
 
@@ -1721,7 +1887,7 @@ private fun VesperNowPlaying(
                             .size(66.dp)
                             .clip(RoundedCornerShape(33.dp))
                             .background(Color(0xFFEAF4FB))
-                            .clickable { onControl(MusicPlayerAction.PLAY_PAUSE) },
+                            .clickable { onControl(player, MusicPlayerAction.PLAY_PAUSE) },
                         contentAlignment = Alignment.Center,
                     ) {
                         BasicText(
@@ -1739,7 +1905,7 @@ private fun VesperNowPlaying(
                     MusicCircleButton(
                         label = "⏭",
                         enabled = player.canNext,
-                    ) { onControl(MusicPlayerAction.NEXT) }
+                    ) { onControl(player, MusicPlayerAction.NEXT) }
                 }
 
                 Spacer(Modifier.height(largeGap))
@@ -1755,7 +1921,7 @@ private fun VesperNowPlaying(
                             .clip(RoundedCornerShape(18.dp))
                             .background(Color(0xFF141A25))
                             .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
-                            .clickable(onClick = onRooms),
+                            .clickable { onRooms(player) },
                         contentAlignment = Alignment.Center,
                     ) {
                         BasicText(
@@ -1778,7 +1944,7 @@ private fun VesperNowPlaying(
                                 BasicText(
                                     "−",
                                     modifier = Modifier
-                                        .clickable { onControl(MusicPlayerAction.VOLUME_DOWN) }
+                                        .clickable { onControl(player, MusicPlayerAction.VOLUME_DOWN) }
                                         .padding(horizontal = 12.dp, vertical = 8.dp),
                                     style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
                                 )
@@ -1789,7 +1955,7 @@ private fun VesperNowPlaying(
                                 BasicText(
                                     "+",
                                     modifier = Modifier
-                                        .clickable { onControl(MusicPlayerAction.VOLUME_UP) }
+                                        .clickable { onControl(player, MusicPlayerAction.VOLUME_UP) }
                                         .padding(horizontal = 12.dp, vertical = 8.dp),
                                     style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
                                 )
