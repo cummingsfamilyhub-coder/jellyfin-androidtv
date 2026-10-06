@@ -169,7 +169,7 @@ class MobileSettingsActivity : FragmentActivity() {
                 avatarMessage = avatarMessage,
                 api = api,
                 appVersion = appVersion,
-                jellyfinName = currentServer?.name ?: "Jellyfin",
+                jellyfinName = currentServer?.name ?: "Media Server",
                 showMiniPlayer = showMiniPlayer,
                 popularityScope = popularityScope,
                 tmdbApiKey = tmdbApiKey,
@@ -365,7 +365,10 @@ class MobileSettingsActivity : FragmentActivity() {
                     )
                 },
                 onOpenJellyfinSettings = {
-                    startActivity(Intent(this, PreferencesActivity::class.java))
+                    startActivity(
+                        Intent(this, PreferencesActivity::class.java)
+                            .putExtra(PreferencesActivity.EXTRA_VESPER_MOBILE_ENTRY, true)
+                    )
                 },
             )
         }
@@ -801,7 +804,7 @@ private fun SettingsHome(
                     )
                     Spacer(Modifier.height(4.dp))
                     BasicText(
-                        "Choose whether Vesper ranks content using global TMDb activity or your Jellyfin household.",
+                        "Choose whether Vesper ranks content using global TMDb activity or your household library.",
                         style = TextStyle(color = Color(0xFF8E97A4), fontSize = 12.sp, lineHeight = 17.sp),
                     )
                     Spacer(Modifier.height(13.dp))
@@ -821,7 +824,7 @@ private fun SettingsHome(
             SettingsCard {
                 SettingsNavigationRow(
                     icon = "V",
-                    title = "Jellyfin",
+                    title = "Media Server",
                     subtitle = jellyfinName,
                     status = "Connected",
                     onClick = { onPage(SettingsPage.JELLYFIN) },
@@ -842,7 +845,7 @@ private fun SettingsHome(
                 SettingsDivider()
                 SettingsNavigationRow(
                     icon = "S",
-                    title = "Seerr",
+                    title = "Media Requests",
                     subtitle = "Search and one-tap requests",
                     status = if (seerrConfigured) "Connected" else "Needs setup",
                     onClick = { onPage(SettingsPage.SEERR) },
@@ -876,8 +879,8 @@ private fun SettingsHome(
             SettingsCard {
                 SettingsNavigationRow(
                     icon = "⚙",
-                    title = "Jellyfin app settings",
-                    subtitle = "Playback, client and legacy Jellyfin options",
+                    title = "Advanced playback settings",
+                    subtitle = "Playback, subtitles and client options",
                     status = null,
                     onClick = onOpenJellyfinSettings,
                 )
@@ -1724,7 +1727,7 @@ private fun JellyfinSettingsPage(
     onOpenJellyfinSettings: () -> Unit,
 ) {
     SettingsDetailScaffold(
-        title = "Jellyfin",
+        title = "Media Server",
         onBack = onBack,
     ) {
         SettingsInfoCard(
@@ -1734,7 +1737,7 @@ private fun JellyfinSettingsPage(
         )
         Spacer(Modifier.height(16.dp))
         SettingsPrimaryButton(
-            label = "Open Jellyfin app settings",
+            label = "Advanced playback settings",
             onClick = onOpenJellyfinSettings,
         )
     }
