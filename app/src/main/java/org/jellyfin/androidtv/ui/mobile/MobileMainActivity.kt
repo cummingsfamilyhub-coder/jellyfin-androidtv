@@ -1416,6 +1416,9 @@ private fun VesperMobile(
                     onPlay = onPlayMusic,
                     onControl = onControlMusic,
                     onUpdateGroup = onUpdateMusicGroup,
+                    onOpenNowPlaying = { player ->
+                        nowPlayingQueueId = player.queueId
+                    },
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
                 )
@@ -1757,7 +1760,7 @@ private fun VesperNowPlaying(
                             .clickable(onClick = onDismiss),
                         contentAlignment = Alignment.Center,
                     ) {
-                        BasicText("⌄", style = TextStyle(color = Color.White, fontSize = 24.sp))
+                        BasicText("↓", style = TextStyle(color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold))
                     }
 
                     Spacer(Modifier.weight(1f))
@@ -2010,7 +2013,7 @@ private fun VideoHub(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
     ) {
         item {
             MobileSectionTopBar(
@@ -2107,17 +2110,16 @@ private fun MusicHub(
     onPlay: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onUpdateGroup: (MaPlayer, Set<String>) -> Unit,
+    onOpenNowPlaying: (MaPlayer) -> Unit,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
     var pendingItem by remember { mutableStateOf<MaMediaItem?>(null) }
-    var selectedPlayerId by remember { mutableStateOf<String?>(null) }
-    var manageGroupPlayerId by remember { mutableStateOf<String?>(null) }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
         ) {
             item {
                 MobileSectionTopBar(
@@ -2156,7 +2158,7 @@ private fun MusicHub(
                                 if (item.playable) pendingItem = item
                             },
                             onControl = onControl,
-                            onOpenPlayer = { selectedPlayerId = it.playerId },
+                            onOpenPlayer = onOpenNowPlaying,
                         )
                     }
 
@@ -2214,7 +2216,7 @@ private fun MusicHub(
                     if (snapshot.players.isNotEmpty()) item {
                         MaPlayerRow(
                             players = snapshot.players,
-                            onClick = { selectedPlayerId = it.playerId },
+                            onClick = onOpenNowPlaying,
                         )
                     }
                 }
@@ -2233,42 +2235,6 @@ private fun MusicHub(
             )
         }
 
-        selectedPlayerId?.let { playerId ->
-            state.snapshot.players.firstOrNull { it.playerId == playerId }?.let { player ->
-                MusicPlayerControlPopup(
-                    player = player,
-                    allPlayers = state.snapshot.players,
-                    onDismiss = { selectedPlayerId = null },
-                    onControl = { action ->
-                        onControl(player, action)
-                    },
-                    onManageRooms = {
-                        val knownPlayerIds = state.snapshot.players.map { it.playerId }.toSet()
-                        val groupTarget = listOfNotNull(
-                            player.syncedTo,
-                            player.activeGroup,
-                            player.playerId,
-                        ).firstOrNull { it in knownPlayerIds } ?: player.playerId
-                        selectedPlayerId = null
-                        manageGroupPlayerId = groupTarget
-                    },
-                )
-            }
-        }
-
-        manageGroupPlayerId?.let { playerId ->
-            state.snapshot.players.firstOrNull { it.playerId == playerId }?.let { player ->
-                MusicGroupManager(
-                    player = player,
-                    players = state.snapshot.players,
-                    onDismiss = { manageGroupPlayerId = null },
-                    onSave = { selectedIds ->
-                        manageGroupPlayerId = null
-                        onUpdateGroup(player, selectedIds)
-                    },
-                )
-            }
-        }
     }
 }
 
@@ -2383,17 +2349,7 @@ private fun MusicHero(
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onOpenPlayer: (MaPlayer) -> Unit,
 ) {
-    val active = snapshot.players.firstOrNull {
-        it.name.equals("This Device", ignoreCase = true) &&
-            it.playbackState in setOf("playing", "paused") &&
-            !it.currentTitle.isNullOrBlank()
-    } ?: snapshot.players.firstOrNull {
-        it.playbackState in setOf("playing", "paused") &&
-            !it.currentTitle.isNullOrBlank() &&
-            it.syncedTo == null
-    } ?: snapshot.players.firstOrNull {
-        it.playbackState in setOf("playing", "paused") && !it.currentTitle.isNullOrBlank()
-    }
+    val active = activeMusicSessions(snapshot.players).firstOrNull()
     val recent = snapshot.recentlyPlayed.firstOrNull()
     val activeRoomCount = active?.let {
         if (it.type == "group") it.groupMembers.distinct().size
@@ -2433,7 +2389,10 @@ private fun MusicHero(
                     )
                 )
             )
-            .border(1.dp, Color(0x554D42A6), RoundedCornerShape(24.dp)),
+            .border(1.dp, Color(0x554D42A6), RoundedCornerShape(24.dp))
+            .clickable(enabled = active != null) {
+                active?.let(onOpenPlayer)
+            },
     ) {
         if (!imageUrl.isNullOrBlank()) {
             AsyncImage(
@@ -3447,7 +3406,7 @@ private fun BooksHub(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
     ) {
         item {
             MobileSectionTopBar(
@@ -3516,6 +3475,8 @@ private fun MobileSectionTopBar(
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -3552,18 +3513,38 @@ private fun MobileSectionTopBar(
                 modifier = Modifier
                     .size(44.dp)
                     .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
-                    .clickable { onSwitchProfile() },
+                    .clickable { menuOpen = true },
             )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(15.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF101821))
-                    .clickable { onSettings() },
-                contentAlignment = Alignment.Center,
-            ) {
-                BasicText("•", style = TextStyle(color = Color(0xFF8A96A5), fontSize = 12.sp))
+
+            if (menuOpen) {
+                Popup(
+                    alignment = Alignment.TopEnd,
+                    onDismissRequest = { menuOpen = false },
+                    properties = PopupProperties(focusable = true),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .width(220.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xF21A1C2A))
+                            .border(1.dp, Color(0x554C4D7B), RoundedCornerShape(18.dp))
+                            .padding(10.dp),
+                    ) {
+                        BasicText(
+                            userName,
+                            style = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                        )
+                        ProfileMenuRow("⇄", "Switch profile") {
+                            menuOpen = false
+                            onSwitchProfile()
+                        }
+                        ProfileMenuRow("⚙", "Settings") {
+                            menuOpen = false
+                            onSettings()
+                        }
+                    }
+                }
             }
         }
     }
@@ -4144,7 +4125,7 @@ private fun MobileHome(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 124.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
     ) {
         item {
             MobileTopBar(
