@@ -145,8 +145,9 @@ internal class VesperMusicPlaybackService : Service() {
                     is PlayerEvent.Warning -> Unit
                 }
                 if (event is PlayerEvent.PlaybackStopped && event.cause == StopCause.FocusLost) {
-                    currentPlayerId?.let { playerId ->
-                        runCatching { runtime?.pause(playerId) }
+                    val queueId = currentPlayer?.queueId ?: currentPlayerId
+                    queueId?.let {
+                        runCatching { runtime?.pause(it) }
                     }
                 }
             }
@@ -215,14 +216,14 @@ internal class VesperMusicPlaybackService : Service() {
     private fun sendControl(control: Control) {
         serviceScope.launch {
             val client = musicAssistantClient ?: return@launch
-            val playerId = resolvePlayerId(client) ?: return@launch
+            val player = resolvePlayer(client) ?: return@launch
             val activeRuntime = runtime ?: return@launch
             runCatching {
                 when (control) {
-                    Control.PLAY -> activeRuntime.resume(playerId)
-                    Control.PAUSE -> activeRuntime.pause(playerId)
-                    Control.NEXT -> activeRuntime.next(playerId)
-                    Control.PREVIOUS -> activeRuntime.previous(playerId)
+                    Control.PLAY -> activeRuntime.resume(player.queueId)
+                    Control.PAUSE -> activeRuntime.pause(player.queueId)
+                    Control.NEXT -> activeRuntime.next(player.queueId)
+                    Control.PREVIOUS -> activeRuntime.previous(player.queueId)
                 }
             }
             delay(CONTROL_REFRESH_DELAY_MS)
@@ -254,18 +255,22 @@ internal class VesperMusicPlaybackService : Service() {
         )
     }
 
-    private suspend fun resolvePlayerId(client: MusicAssistantClient): String? {
-        currentPlayerId?.let { return it }
-        (runtime?.state?.value as? PlayerState.Connected)?.playerId?.let {
-            currentPlayerId = it
+    private suspend fun resolvePlayer(client: MusicAssistantClient): MaPlayer? {
+        val connectedId = (runtime?.state?.value as? PlayerState.Connected)?.playerId ?: currentPlayerId
+        currentPlayer?.takeIf { connectedId == null || it.playerId == connectedId }?.let {
             return it
         }
         val discovered = withContext(Dispatchers.IO) {
             runCatching {
-                client.loadPlayers().firstOrNull { it.name == DEVICE_NAME }?.playerId
+                val players = client.loadPlayers()
+                connectedId?.let { id -> players.firstOrNull { it.playerId == id } }
+                    ?: players.firstOrNull { it.name == DEVICE_NAME }
             }.getOrNull()
         }
-        currentPlayerId = discovered
+        if (discovered != null) {
+            currentPlayerId = discovered.playerId
+            currentPlayer = discovered
+        }
         return discovered
     }
 
