@@ -46,6 +46,8 @@ internal data class MaPlayer(
     val queueCurrentIndex: Int?,
     val queueResumePosition: Int,
     val queueElapsedTime: Int,
+    val queueDuration: Int,
+    val queueActive: Boolean,
     val queueEnded: Boolean,
     val canPrevious: Boolean,
     val canNext: Boolean,
@@ -236,6 +238,15 @@ internal class MusicAssistantClient(
         command("player_queues/previous", JSONObject().put("queue_id", queueId))
     }
 
+    fun seek(queueId: String, positionSeconds: Int) {
+        command(
+            "player_queues/seek",
+            JSONObject()
+                .put("queue_id", queueId)
+                .put("position", positionSeconds.coerceAtLeast(0))
+        )
+    }
+
     fun setVolume(playerId: String, volume: Int) {
         command(
             "players/cmd/volume_set",
@@ -373,6 +384,14 @@ internal class MusicAssistantClient(
         val queueState = queue?.optString("state")?.takeIf { it.isNotBlank() }
         val resumePos = queue?.optInt("resume_pos", 0) ?: 0
         val elapsedTime = queue?.optDouble("elapsed_time", 0.0)?.toInt() ?: 0
+        val duration = queueCurrent?.optDouble("duration", 0.0)?.toInt()
+            ?.takeIf { it > 0 }
+            ?: queueMedia?.optDouble("duration", 0.0)?.toInt()
+                ?.takeIf { it > 0 }
+            ?: playerCurrent?.optDouble("duration", 0.0)?.toInt()
+                ?.takeIf { it > 0 }
+            ?: 0
+        val queueActive = queue?.optBoolean("active", false) ?: false
         val queueEnded = queue?.optBoolean("ended", false) ?: false
         val queueHasParkedItem =
             !queueEnded &&
@@ -426,6 +445,8 @@ internal class MusicAssistantClient(
             queueCurrentIndex = queueIndex,
             queueResumePosition = resumePos,
             queueElapsedTime = elapsedTime,
+            queueDuration = duration,
+            queueActive = queueActive,
             queueEnded = queueEnded,
             canPrevious = hasPrevious,
             canNext = hasNext,
