@@ -47,6 +47,7 @@ internal fun VesperProfileAvatar(
                 modifier = Modifier.fillMaxSize(),
                 url = imageUrl,
                 scaleType = ImageView.ScaleType.CENTER_CROP,
+                crossFadeDurationMs = 0,
             )
         }
     }
