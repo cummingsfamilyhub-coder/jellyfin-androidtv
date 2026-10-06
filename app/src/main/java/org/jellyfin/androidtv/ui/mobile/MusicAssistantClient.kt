@@ -22,6 +22,7 @@ internal data class MaMediaItem(
 
 internal data class MaPlayer(
     val playerId: String,
+    val queueId: String,
     val provider: String,
     val name: String,
     val type: String,
@@ -212,24 +213,24 @@ internal class MusicAssistantClient(
         )
     }
 
-    fun resume(playerId: String) {
-        command("players/cmd/play", JSONObject().put("player_id", playerId))
+    fun resume(queueId: String) {
+        command("player_queues/resume", JSONObject().put("queue_id", queueId))
     }
 
-    fun pause(playerId: String) {
-        command("players/cmd/pause", JSONObject().put("player_id", playerId))
+    fun pause(queueId: String) {
+        command("player_queues/pause", JSONObject().put("queue_id", queueId))
     }
 
-    fun playPause(playerId: String) {
-        command("players/cmd/play_pause", JSONObject().put("player_id", playerId))
+    fun playPause(queueId: String) {
+        command("player_queues/play_pause", JSONObject().put("queue_id", queueId))
     }
 
-    fun next(playerId: String) {
-        command("players/cmd/next", JSONObject().put("player_id", playerId))
+    fun next(queueId: String) {
+        command("player_queues/next", JSONObject().put("queue_id", queueId))
     }
 
-    fun previous(playerId: String) {
-        command("players/cmd/previous", JSONObject().put("player_id", playerId))
+    fun previous(queueId: String) {
+        command("player_queues/previous", JSONObject().put("queue_id", queueId))
     }
 
     fun setVolume(playerId: String, volume: Int) {
@@ -352,18 +353,46 @@ internal class MusicAssistantClient(
         val name = json.optString("name").trim()
         if (id.isBlank() || name.isBlank()) return null
 
-        val current = json.optJSONObject("current_media")
-        val mediaType = current?.optString("media_type")?.takeIf { it.isNotBlank() }
+        val playerCurrent = json.optJSONObject("current_media")
+        val queueCurrent = queue?.optJSONObject("current_item")
+        val queueMedia = queueCurrent?.optJSONObject("media_item")
+        val mediaType = playerCurrent?.optString("media_type")?.takeIf { it.isNotBlank() }
+            ?: queueMedia?.optString("media_type")?.takeIf { it.isNotBlank() }
         val queueItems = queue?.optInt("items", 0) ?: 0
         val queueIndex = queue?.let {
             if (it.isNull("current_index")) null else it.optInt("current_index")
         }
+        val activeSource = json.optString("active_source").takeIf { it.isNotBlank() }
+        val queueId = queue?.optString("queue_id")?.takeIf { it.isNotBlank() }
+            ?: activeSource
+            ?: id
+        val playerState = json.optString("playback_state").ifBlank { "idle" }
+        val queueState = queue?.optString("state")?.takeIf { it.isNotBlank() }
+        val resumePos = queue?.optInt("resume_pos", 0) ?: 0
+        val queueEnded = queue?.optBoolean("ended", false) ?: false
+        val effectiveState = when {
+            playerState == "playing" || queueState == "playing" -> "playing"
+            playerState == "paused" || queueState == "paused" -> "paused"
+            !queueEnded && queueCurrent != null && resumePos > 0 -> "paused"
+            else -> playerState
+        }
+        val currentTitle = playerCurrent?.optString("title")?.takeIf { it.isNotBlank() }
+            ?: queueMedia?.optString("name")?.takeIf { it.isNotBlank() }
+            ?: queueCurrent?.optString("name")?.takeIf { it.isNotBlank() }
+        val currentArtist = playerCurrent?.optString("artist")?.takeIf { it.isNotBlank() }
+            ?: queueMedia?.let(::artistNames)?.takeIf { it.isNotBlank() }
+        val currentImageUrl = playerCurrent?.optString("image_url")
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::normalizeImageUrl)
+            ?: queueCurrent?.optJSONObject("image")?.let(::imageUrl)
+            ?: queueMedia?.let(::mediaImageUrl)
         val isLive = mediaType in setOf("radio", "audio_source")
         val hasPrevious = !isLive && queueIndex != null && queueIndex > 0
         val hasNext = !isLive && queue?.optJSONObject("next_item") != null
 
         return MaPlayer(
             playerId = id,
+            queueId = queueId,
             provider = json.optString("provider"),
             name = name,
             type = json.optString("type").ifBlank { "player" },
@@ -372,15 +401,13 @@ internal class MusicAssistantClient(
             hidden = json.optBoolean("hide_in_ui", false),
             privatePlayer = json.optBoolean("private", false),
             powered = if (json.isNull("powered")) null else json.optBoolean("powered"),
-            playbackState = json.optString("playback_state").ifBlank { "idle" },
+            playbackState = effectiveState,
             volumeLevel = if (json.isNull("volume_level")) null else json.optInt("volume_level"),
-            currentTitle = current?.optString("title")?.takeIf { it.isNotBlank() },
-            currentArtist = current?.optString("artist")?.takeIf { it.isNotBlank() },
-            currentImageUrl = current?.optString("image_url")
-                ?.takeIf { it.isNotBlank() }
-                ?.let(::normalizeImageUrl),
+            currentTitle = currentTitle,
+            currentArtist = currentArtist,
+            currentImageUrl = currentImageUrl,
             currentMediaType = mediaType,
-            activeSource = json.optString("active_source").takeIf { it.isNotBlank() },
+            activeSource = activeSource,
             activeGroup = json.optString("active_group").takeIf { it.isNotBlank() },
             syncedTo = json.optString("synced_to").takeIf { it.isNotBlank() },
             groupMembers = json.stringList("group_members"),
