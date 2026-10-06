@@ -44,6 +44,9 @@ internal data class MaPlayer(
     val canGroupWith: Set<String>,
     val queueItemCount: Int,
     val queueCurrentIndex: Int?,
+    val queueResumePosition: Int,
+    val queueElapsedTime: Int,
+    val queueEnded: Boolean,
     val canPrevious: Boolean,
     val canNext: Boolean,
 )
@@ -369,11 +372,18 @@ internal class MusicAssistantClient(
         val playerState = json.optString("playback_state").ifBlank { "idle" }
         val queueState = queue?.optString("state")?.takeIf { it.isNotBlank() }
         val resumePos = queue?.optInt("resume_pos", 0) ?: 0
+        val elapsedTime = queue?.optDouble("elapsed_time", 0.0)?.toInt() ?: 0
         val queueEnded = queue?.optBoolean("ended", false) ?: false
+        val queueHasParkedItem =
+            !queueEnded &&
+                queueCurrent != null &&
+                queueIndex != null &&
+                queueItems > 0 &&
+                (resumePos > 0 || elapsedTime > 0 || queueState == "paused")
         val effectiveState = when {
             playerState == "playing" || queueState == "playing" -> "playing"
             playerState == "paused" || queueState == "paused" -> "paused"
-            !queueEnded && queueCurrent != null && resumePos > 0 -> "paused"
+            queueHasParkedItem -> "paused"
             else -> playerState
         }
         val currentTitle = playerCurrent?.optString("title")?.takeIf { it.isNotBlank() }
@@ -414,6 +424,9 @@ internal class MusicAssistantClient(
             canGroupWith = json.stringList("can_group_with").toSet(),
             queueItemCount = queueItems,
             queueCurrentIndex = queueIndex,
+            queueResumePosition = resumePos,
+            queueElapsedTime = elapsedTime,
+            queueEnded = queueEnded,
             canPrevious = hasPrevious,
             canNext = hasNext,
         )
