@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1776,19 +1777,24 @@ internal fun VesperPinPad(
 private fun SettingsSecondaryButton(
     label: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF242936))
-            .clickable(onClick = onClick)
+            .background(if (enabled) Color(0xFF242936) else Color(0xFF171B24))
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
             label,
-            style = TextStyle(color = Color(0xFFD6DCE5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+            style = TextStyle(
+                color = if (enabled) Color(0xFFD6DCE5) else Color(0xFF626A76),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
         )
     }
 }
@@ -1918,6 +1924,89 @@ private fun DiscoveryRequestSettingsPage(
     var audioUrl by remember(initialAudioUrl) { mutableStateOf(initialAudioUrl) }
     var audioToken by remember(initialAudioToken) { mutableStateOf(initialAudioToken) }
 
+    var musicTesting by remember { mutableStateOf(false) }
+    var musicTestMessage by remember { mutableStateOf<String?>(null) }
+    var musicTestSuccess by remember { mutableStateOf(false) }
+
+    var booksTesting by remember { mutableStateOf(false) }
+    var booksTestMessage by remember { mutableStateOf<String?>(null) }
+    var booksTestSuccess by remember { mutableStateOf(false) }
+
+    var audioTesting by remember { mutableStateOf(false) }
+    var audioTestMessage by remember { mutableStateOf<String?>(null) }
+    var audioTestSuccess by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+
+    fun testMusic() {
+        if (musicTesting || musicUrl.isBlank() || musicKey.isBlank()) return
+        musicTesting = true
+        musicTestMessage = null
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    AurralRequestClient(
+                        baseUrl = musicUrl.trim(),
+                        apiKey = musicKey.trim(),
+                    ).validateConnection()
+                }
+            }.onSuccess {
+                musicTestSuccess = true
+                musicTestMessage = "Aurral connected successfully."
+            }.onFailure { error ->
+                musicTestSuccess = false
+                musicTestMessage = error.message ?: "Couldn't connect to Aurral."
+            }
+            musicTesting = false
+        }
+    }
+
+    fun testBooks() {
+        if (booksTesting || booksUrl.isBlank() || booksKey.isBlank()) return
+        booksTesting = true
+        booksTestMessage = null
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    LazyLibrarianRequestClient(
+                        baseUrl = booksUrl.trim(),
+                        apiKey = booksKey.trim(),
+                    ).validateConnection()
+                }
+            }.onSuccess {
+                booksTestSuccess = true
+                booksTestMessage = "LazyLibrarian connected successfully."
+            }.onFailure { error ->
+                booksTestSuccess = false
+                booksTestMessage = error.message ?: "Couldn't connect to LazyLibrarian."
+            }
+            booksTesting = false
+        }
+    }
+
+    fun testAudiobooks() {
+        if (audioTesting || audioUrl.isBlank() || audioToken.isBlank()) return
+        audioTesting = true
+        audioTestMessage = null
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    AudiobookshelfLibraryClient(
+                        baseUrl = audioUrl.trim(),
+                        token = audioToken.trim(),
+                    ).validateConnection()
+                }
+            }.onSuccess {
+                audioTestSuccess = true
+                audioTestMessage = "Audiobookshelf connected successfully."
+            }.onFailure { error ->
+                audioTestSuccess = false
+                audioTestMessage = error.message ?: "Couldn't connect to Audiobookshelf."
+            }
+            audioTesting = false
+        }
+    }
+
     SettingsDetailScaffold(
         title = "Music & Book Requests",
         onBack = onBack,
@@ -1925,64 +2014,130 @@ private fun DiscoveryRequestSettingsPage(
         SettingsInfoCard(
             title = "Vesper Search",
             value = "Music · Books · Audiobooks",
-            helper = "These connections stay behind Vesper's Search UI. Use HTTPS addresses if you want discovery and requests away from home.",
+            helper = "These are admin connections behind Vesper's Search and Books UI. Users won't see the backend service names.",
         )
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(22.dp))
         SettingsSectionLabel("MUSIC REQUESTS")
         Spacer(Modifier.height(9.dp))
+        SettingsInfoCard(
+            title = "Aurral",
+            value = "Album discovery and requests",
+            helper = "Use the address you normally open Aurral with. In Aurral go to Settings → System → API access and copy its API key.",
+        )
+        Spacer(Modifier.height(11.dp))
         SettingsField(
-            label = "Service URL",
+            label = "Aurral URL",
             value = musicUrl,
-            onValueChange = { musicUrl = it },
-            placeholder = "https://music-requests.example.com",
+            onValueChange = {
+                musicUrl = it
+                musicTestMessage = null
+            },
+            placeholder = "https://aurral.example.com",
         )
         Spacer(Modifier.height(10.dp))
         SettingsField(
-            label = "API key",
+            label = "Aurral API key",
             value = musicKey,
-            onValueChange = { musicKey = it },
-            placeholder = "Music Requests API key",
+            onValueChange = {
+                musicKey = it
+                musicTestMessage = null
+            },
+            placeholder = "Aurral API key",
             password = true,
         )
+        Spacer(Modifier.height(10.dp))
+        SettingsSecondaryButton(
+            label = if (musicTesting) "Testing Aurral…" else "Test Aurral",
+            onClick = ::testMusic,
+            enabled = musicUrl.isNotBlank() && musicKey.isNotBlank() && !musicTesting,
+        )
+        ConnectionTestMessage(
+            message = musicTestMessage,
+            success = musicTestSuccess,
+        )
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(24.dp))
         SettingsSectionLabel("BOOK & AUDIOBOOK REQUESTS")
         Spacer(Modifier.height(9.dp))
+        SettingsInfoCard(
+            title = "LazyLibrarian",
+            value = "eBook and audiobook requests",
+            helper = "Use the address you normally open LazyLibrarian with. Enable API access in its Interface settings and copy the API key.",
+        )
+        Spacer(Modifier.height(11.dp))
         SettingsField(
-            label = "Service URL",
+            label = "LazyLibrarian URL",
             value = booksUrl,
-            onValueChange = { booksUrl = it },
-            placeholder = "https://book-requests.example.com",
+            onValueChange = {
+                booksUrl = it
+                booksTestMessage = null
+            },
+            placeholder = "https://books.example.com",
         )
         Spacer(Modifier.height(10.dp))
         SettingsField(
-            label = "API key",
+            label = "LazyLibrarian API key",
             value = booksKey,
-            onValueChange = { booksKey = it },
-            placeholder = "Book Requests API key",
+            onValueChange = {
+                booksKey = it
+                booksTestMessage = null
+            },
+            placeholder = "LazyLibrarian API key",
             password = true,
         )
+        Spacer(Modifier.height(10.dp))
+        SettingsSecondaryButton(
+            label = if (booksTesting) "Testing LazyLibrarian…" else "Test LazyLibrarian",
+            onClick = ::testBooks,
+            enabled = booksUrl.isNotBlank() && booksKey.isNotBlank() && !booksTesting,
+        )
+        ConnectionTestMessage(
+            message = booksTestMessage,
+            success = booksTestSuccess,
+        )
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(24.dp))
         SettingsSectionLabel("AUDIOBOOK LIBRARY")
         Spacer(Modifier.height(9.dp))
+        SettingsInfoCard(
+            title = "Audiobookshelf",
+            value = "Library, progress and book metadata",
+            helper = "Use the address you normally open Audiobookshelf with. Create a dedicated API key in Settings → Users → API Keys and copy it here.",
+        )
+        Spacer(Modifier.height(11.dp))
         SettingsField(
-            label = "Service URL",
+            label = "Audiobookshelf URL",
             value = audioUrl,
-            onValueChange = { audioUrl = it },
+            onValueChange = {
+                audioUrl = it
+                audioTestMessage = null
+            },
             placeholder = "https://audiobooks.example.com",
         )
         Spacer(Modifier.height(10.dp))
         SettingsField(
-            label = "Access token",
+            label = "Audiobookshelf API key",
             value = audioToken,
-            onValueChange = { audioToken = it },
-            placeholder = "Audiobook Library token",
+            onValueChange = {
+                audioToken = it
+                audioTestMessage = null
+            },
+            placeholder = "Audiobookshelf API key",
             password = true,
         )
+        Spacer(Modifier.height(10.dp))
+        SettingsSecondaryButton(
+            label = if (audioTesting) "Testing Audiobookshelf…" else "Test Audiobookshelf",
+            onClick = ::testAudiobooks,
+            enabled = audioUrl.isNotBlank() && audioToken.isNotBlank() && !audioTesting,
+        )
+        ConnectionTestMessage(
+            message = audioTestMessage,
+            success = audioTestSuccess,
+        )
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(24.dp))
         SettingsPrimaryButton(
             label = "Save connections",
             onClick = {
@@ -2001,6 +2156,24 @@ private fun DiscoveryRequestSettingsPage(
                     (audioUrl.isBlank() == audioToken.isBlank()),
         )
     }
+}
+
+@Composable
+private fun ConnectionTestMessage(
+    message: String?,
+    success: Boolean,
+) {
+    if (message.isNullOrBlank()) return
+
+    Spacer(Modifier.height(8.dp))
+    BasicText(
+        message,
+        style = TextStyle(
+            color = if (success) Color(0xFFA8D9C1) else Color(0xFFFFB7BE),
+            fontSize = 11.sp,
+            lineHeight = 15.sp,
+        ),
+    )
 }
 
 @Composable
