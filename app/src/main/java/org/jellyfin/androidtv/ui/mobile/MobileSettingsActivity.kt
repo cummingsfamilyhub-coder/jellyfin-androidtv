@@ -97,6 +97,12 @@ class MobileSettingsActivity : FragmentActivity() {
     private var musicAssistantConnectionVerified by mutableStateOf(false)
     private var musicAssistantConnectionMessage by mutableStateOf<String?>(null)
     private var musicAssistantConnectionTesting by mutableStateOf(false)
+    private var musicRequestsUrl by mutableStateOf("")
+    private var musicRequestsApiKey by mutableStateOf("")
+    private var bookRequestsUrl by mutableStateOf("")
+    private var bookRequestsApiKey by mutableStateOf("")
+    private var audiobookLibraryUrl by mutableStateOf("")
+    private var audiobookLibraryToken by mutableStateOf("")
     private var pinConfigured by mutableStateOf(false)
     private var profileImageUrl by mutableStateOf<String?>(null)
     private var avatarSuggestions by mutableStateOf<List<BaseItemDto>>(emptyList())
@@ -184,6 +190,12 @@ class MobileSettingsActivity : FragmentActivity() {
                 musicAssistantConnectionVerified = musicAssistantConnectionVerified,
                 musicAssistantConnectionMessage = musicAssistantConnectionMessage,
                 musicAssistantConnectionTesting = musicAssistantConnectionTesting,
+                musicRequestsUrl = musicRequestsUrl,
+                musicRequestsApiKey = musicRequestsApiKey,
+                bookRequestsUrl = bookRequestsUrl,
+                bookRequestsApiKey = bookRequestsApiKey,
+                audiobookLibraryUrl = audiobookLibraryUrl,
+                audiobookLibraryToken = audiobookLibraryToken,
                 onBack = {
                     if (page == SettingsPage.MAIN) finish()
                     else page = SettingsPage.MAIN
@@ -259,6 +271,24 @@ class MobileSettingsActivity : FragmentActivity() {
                             },
                         )
                     }
+                },
+                onSaveDiscoveryRequests = { musicUrl, musicKey, booksUrl, booksKey, audioUrl, audioToken ->
+                    musicRequestsUrl = musicUrl.trim().trimEnd('/')
+                    musicRequestsApiKey = musicKey.trim()
+                    bookRequestsUrl = booksUrl.trim().trimEnd('/')
+                    bookRequestsApiKey = booksKey.trim()
+                    audiobookLibraryUrl = audioUrl.trim().trimEnd('/')
+                    audiobookLibraryToken = audioToken.trim()
+                    preferences.edit()
+                        .putString("music_requests_url", musicRequestsUrl)
+                        .putString("music_requests_api_key", musicRequestsApiKey)
+                        .putString("book_requests_url", bookRequestsUrl)
+                        .putString("book_requests_api_key", bookRequestsApiKey)
+                        .putString("audiobook_library_url", audiobookLibraryUrl)
+                        .putString("audiobook_library_token", audiobookLibraryToken)
+                        .apply()
+                    markChanged()
+                    page = SettingsPage.MAIN
                 },
                 onSaveSeerr = { key ->
                     seerrApiKey = key.trim()
@@ -568,6 +598,12 @@ class MobileSettingsActivity : FragmentActivity() {
             .getString("music_assistant_url", "http://192.168.1.34:8095")
             .orEmpty()
         musicAssistantToken = preferences.getString("music_assistant_token", "").orEmpty()
+        musicRequestsUrl = preferences.getString("music_requests_url", "").orEmpty()
+        musicRequestsApiKey = preferences.getString("music_requests_api_key", "").orEmpty()
+        bookRequestsUrl = preferences.getString("book_requests_url", "").orEmpty()
+        bookRequestsApiKey = preferences.getString("book_requests_api_key", "").orEmpty()
+        audiobookLibraryUrl = preferences.getString("audiobook_library_url", "").orEmpty()
+        audiobookLibraryToken = preferences.getString("audiobook_library_token", "").orEmpty()
     }
 
     private fun markChanged() {
@@ -584,6 +620,7 @@ private enum class SettingsPage {
     PROFILE,
     JELLYFIN,
     MUSIC_ASSISTANT,
+    DISCOVERY_REQUESTS,
     SEERR,
     TMDB,
     TVDB,
@@ -620,12 +657,19 @@ private fun VesperSettingsScreen(
     musicAssistantConnectionVerified: Boolean,
     musicAssistantConnectionMessage: String?,
     musicAssistantConnectionTesting: Boolean,
+    musicRequestsUrl: String,
+    musicRequestsApiKey: String,
+    bookRequestsUrl: String,
+    bookRequestsApiKey: String,
+    audiobookLibraryUrl: String,
+    audiobookLibraryToken: String,
     onBack: () -> Unit,
     onPage: (SettingsPage) -> Unit,
     onMiniPlayer: (Boolean) -> Unit,
     onPopularity: (String) -> Unit,
     onSaveMusicAssistant: (String, String) -> Unit,
     onTestMusicAssistant: (String, String) -> Unit,
+    onSaveDiscoveryRequests: (String, String, String, String, String, String) -> Unit,
     onSaveSeerr: (String) -> Unit,
     onSaveTmdb: (String) -> Unit,
     onSaveTvdb: (String, String) -> Unit,
@@ -668,6 +712,11 @@ private fun VesperSettingsScreen(
                 musicAssistantRemoteReady = runCatching {
                     VesperMusicEndpoint.from(musicAssistantUrl).remoteReady
                 }.getOrDefault(false),
+                discoveryRequestConnections = listOf(
+                    musicRequestsUrl.isNotBlank() && musicRequestsApiKey.isNotBlank(),
+                    bookRequestsUrl.isNotBlank() && bookRequestsApiKey.isNotBlank(),
+                    audiobookLibraryUrl.isNotBlank() && audiobookLibraryToken.isNotBlank(),
+                ).count { it },
                 onBack = onBack,
                 onPage = onPage,
                 onMiniPlayer = onMiniPlayer,
@@ -714,6 +763,17 @@ private fun VesperSettingsScreen(
                 onTest = onTestMusicAssistant,
             )
 
+            SettingsPage.DISCOVERY_REQUESTS -> DiscoveryRequestSettingsPage(
+                initialMusicUrl = musicRequestsUrl,
+                initialMusicKey = musicRequestsApiKey,
+                initialBooksUrl = bookRequestsUrl,
+                initialBooksKey = bookRequestsApiKey,
+                initialAudioUrl = audiobookLibraryUrl,
+                initialAudioToken = audiobookLibraryToken,
+                onBack = onBack,
+                onSave = onSaveDiscoveryRequests,
+            )
+
             SettingsPage.SEERR -> SeerrSettingsPage(
                 initialKey = seerrApiKey,
                 onBack = onBack,
@@ -756,6 +816,7 @@ private fun SettingsHome(
     musicAssistantConfigured: Boolean,
     musicAssistantVerified: Boolean,
     musicAssistantRemoteReady: Boolean,
+    discoveryRequestConnections: Int,
     onBack: () -> Unit,
     onPage: (SettingsPage) -> Unit,
     onMiniPlayer: (Boolean) -> Unit,
@@ -845,10 +906,22 @@ private fun SettingsHome(
                 SettingsDivider()
                 SettingsNavigationRow(
                     icon = "S",
-                    title = "Media Requests",
-                    subtitle = "Search and one-tap requests",
+                    title = "Video Requests",
+                    subtitle = "Movies and TV requests",
                     status = if (seerrConfigured) "Connected" else "Needs setup",
                     onClick = { onPage(SettingsPage.SEERR) },
+                )
+                SettingsDivider()
+                SettingsNavigationRow(
+                    icon = "⌕",
+                    title = "Music & Book Requests",
+                    subtitle = "Music, books and audiobooks in Search",
+                    status = when (discoveryRequestConnections) {
+                        0 -> "Needs setup"
+                        3 -> "Configured"
+                        else -> "$discoveryRequestConnections of 3"
+                    },
+                    onClick = { onPage(SettingsPage.DISCOVERY_REQUESTS) },
                 )
                 SettingsDivider()
                 SettingsNavigationRow(
@@ -1824,6 +1897,109 @@ private fun MusicAssistantSettingsPage(
                 ),
             )
         }
+    }
+}
+
+@Composable
+private fun DiscoveryRequestSettingsPage(
+    initialMusicUrl: String,
+    initialMusicKey: String,
+    initialBooksUrl: String,
+    initialBooksKey: String,
+    initialAudioUrl: String,
+    initialAudioToken: String,
+    onBack: () -> Unit,
+    onSave: (String, String, String, String, String, String) -> Unit,
+) {
+    var musicUrl by remember(initialMusicUrl) { mutableStateOf(initialMusicUrl) }
+    var musicKey by remember(initialMusicKey) { mutableStateOf(initialMusicKey) }
+    var booksUrl by remember(initialBooksUrl) { mutableStateOf(initialBooksUrl) }
+    var booksKey by remember(initialBooksKey) { mutableStateOf(initialBooksKey) }
+    var audioUrl by remember(initialAudioUrl) { mutableStateOf(initialAudioUrl) }
+    var audioToken by remember(initialAudioToken) { mutableStateOf(initialAudioToken) }
+
+    SettingsDetailScaffold(
+        title = "Music & Book Requests",
+        onBack = onBack,
+    ) {
+        SettingsInfoCard(
+            title = "Vesper Search",
+            value = "Music · Books · Audiobooks",
+            helper = "These connections stay behind Vesper's Search UI. Use HTTPS addresses if you want discovery and requests away from home.",
+        )
+
+        Spacer(Modifier.height(18.dp))
+        SettingsSectionLabel("MUSIC REQUESTS")
+        Spacer(Modifier.height(9.dp))
+        SettingsField(
+            label = "Service URL",
+            value = musicUrl,
+            onValueChange = { musicUrl = it },
+            placeholder = "https://music-requests.example.com",
+        )
+        Spacer(Modifier.height(10.dp))
+        SettingsField(
+            label = "API key",
+            value = musicKey,
+            onValueChange = { musicKey = it },
+            placeholder = "Music Requests API key",
+            password = true,
+        )
+
+        Spacer(Modifier.height(22.dp))
+        SettingsSectionLabel("BOOK & AUDIOBOOK REQUESTS")
+        Spacer(Modifier.height(9.dp))
+        SettingsField(
+            label = "Service URL",
+            value = booksUrl,
+            onValueChange = { booksUrl = it },
+            placeholder = "https://book-requests.example.com",
+        )
+        Spacer(Modifier.height(10.dp))
+        SettingsField(
+            label = "API key",
+            value = booksKey,
+            onValueChange = { booksKey = it },
+            placeholder = "Book Requests API key",
+            password = true,
+        )
+
+        Spacer(Modifier.height(22.dp))
+        SettingsSectionLabel("AUDIOBOOK LIBRARY")
+        Spacer(Modifier.height(9.dp))
+        SettingsField(
+            label = "Service URL",
+            value = audioUrl,
+            onValueChange = { audioUrl = it },
+            placeholder = "https://audiobooks.example.com",
+        )
+        Spacer(Modifier.height(10.dp))
+        SettingsField(
+            label = "Access token",
+            value = audioToken,
+            onValueChange = { audioToken = it },
+            placeholder = "Audiobook Library token",
+            password = true,
+        )
+
+        Spacer(Modifier.height(22.dp))
+        SettingsPrimaryButton(
+            label = "Save connections",
+            onClick = {
+                onSave(
+                    musicUrl,
+                    musicKey,
+                    booksUrl,
+                    booksKey,
+                    audioUrl,
+                    audioToken,
+                )
+            },
+            enabled =
+                (musicUrl.isBlank() == musicKey.isBlank()) &&
+                    (booksUrl.isBlank() == booksKey.isBlank()) &&
+                    (audioUrl.isBlank() == audioToken.isBlank()),
+        )
     }
 }
 
