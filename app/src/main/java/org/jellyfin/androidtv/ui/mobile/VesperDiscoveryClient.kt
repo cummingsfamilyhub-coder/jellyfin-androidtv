@@ -29,6 +29,55 @@ internal data class VesperBookRequestResult(
     val audiobookStatus: String?,
 )
 
+internal data class VesperBookItem(
+    val itemId: String,
+    val libraryId: String,
+    val title: String,
+    val subtitle: String?,
+    val author: String,
+    val narrator: String?,
+    val description: String?,
+    val series: String?,
+    val publishedYear: String?,
+    val coverUrl: String?,
+    val hasAudio: Boolean,
+    val hasEbook: Boolean,
+    val durationSeconds: Int,
+    val addedAt: Long,
+    val progress: Double? = null,
+) {
+    val mediaKind: String
+        get() = when {
+            hasAudio && hasEbook -> "Audiobook + eBook"
+            hasAudio -> "Audiobook"
+            hasEbook -> "eBook"
+            else -> "Book"
+        }
+}
+
+internal data class VesperBookPerson(
+    val id: String,
+    val name: String,
+    val count: Int,
+)
+
+internal data class VesperBookSeries(
+    val id: String,
+    val name: String,
+    val count: Int,
+)
+
+internal data class VesperBookHomeSnapshot(
+    val continueListening: List<VesperBookItem> = emptyList(),
+    val continueReading: List<VesperBookItem> = emptyList(),
+    val recentlyAdded: List<VesperBookItem> = emptyList(),
+    val discover: List<VesperBookItem> = emptyList(),
+    val audiobooks: List<VesperBookItem> = emptyList(),
+    val ebooks: List<VesperBookItem> = emptyList(),
+    val authors: List<VesperBookPerson> = emptyList(),
+    val series: List<VesperBookSeries> = emptyList(),
+)
+
 internal data class VesperBookLibraryResult(
     val itemId: String,
     val title: String,
@@ -296,6 +345,115 @@ internal class AudiobookshelfLibraryClient(
         request("/api/libraries")
     }
 
+    fun loadHome(limitPerShelf: Int = 14): VesperBookHomeSnapshot {
+        val libraries = request("/api/libraries").optJSONArray("libraries") ?: JSONArray()
+        val bookLibraries = buildList {
+            for (index in 0 until libraries.length()) {
+                val library = libraries.optJSONObject(index) ?: continue
+                if (library.optString("mediaType") == "book") {
+                    library.optString("id").takeIf { it.isNotBlank() }?.let(::add)
+                }
+            }
+        }
+        if (bookLibraries.isEmpty()) return VesperBookHomeSnapshot()
+
+        val continueListening = mutableListOf<VesperBookItem>()
+        val continueReading = mutableListOf<VesperBookItem>()
+        val recentlyAdded = mutableListOf<VesperBookItem>()
+        val discover = mutableListOf<VesperBookItem>()
+        val allItems = mutableListOf<VesperBookItem>()
+        val authors = mutableListOf<VesperBookPerson>()
+        val series = mutableListOf<VesperBookSeries>()
+
+        for (libraryId in bookLibraries) {
+            val shelves = request(
+                "/api/libraries/${encodePath(libraryId)}/personalized?limit=$limitPerShelf"
+            ).optJSONArray("items") ?: run {
+                val raw = requestAny(
+                    "/api/libraries/${encodePath(libraryId)}/personalized?limit=$limitPerShelf"
+                )
+                raw as? JSONArray ?: JSONArray()
+            }
+
+            for (index in 0 until shelves.length()) {
+                val shelf = shelves.optJSONObject(index) ?: continue
+                val id = shelf.optString("id")
+                val entities = shelf.optJSONArray("entities") ?: JSONArray()
+                val parsed = buildList {
+                    for (entityIndex in 0 until entities.length()) {
+                        entities.optJSONObject(entityIndex)?.let { parseBookItem(it) }?.let(::add)
+                    }
+                }
+                when (id) {
+                    "continue-listening" -> continueListening += parsed
+                    "continue-reading" -> continueReading += parsed
+                    "recently-added" -> recentlyAdded += parsed
+                    "discover" -> discover += parsed
+                }
+            }
+
+            val itemsPayload = request(
+                "/api/libraries/${encodePath(libraryId)}/items?limit=80&page=0&sort=addedAt&desc=1"
+            )
+            val results = itemsPayload.optJSONArray("results") ?: JSONArray()
+            for (index in 0 until results.length()) {
+                results.optJSONObject(index)?.let { parseBookItem(it) }?.let(allItems::add)
+            }
+
+            val authorsPayload = request(
+                "/api/libraries/${encodePath(libraryId)}/authors?limit=20&page=0"
+            )
+            val authorResults = authorsPayload.optJSONArray("results") ?: JSONArray()
+            for (index in 0 until authorResults.length()) {
+                val item = authorResults.optJSONObject(index) ?: continue
+                val name = item.optString("name").trim()
+                val id = item.optString("id").trim()
+                if (id.isNotBlank() && name.isNotBlank()) {
+                    authors += VesperBookPerson(
+                        id = id,
+                        name = name,
+                        count = item.optInt("numBooks", item.optInt("numItems", 0)),
+                    )
+                }
+            }
+
+            val seriesPayload = request(
+                "/api/libraries/${encodePath(libraryId)}/series?limit=20&page=0&sort=name&desc=0"
+            )
+            val seriesResults = seriesPayload.optJSONArray("results") ?: JSONArray()
+            for (index in 0 until seriesResults.length()) {
+                val item = seriesResults.optJSONObject(index) ?: continue
+                val name = item.optString("name").trim()
+                val id = item.optString("id").trim()
+                if (id.isNotBlank() && name.isNotBlank()) {
+                    series += VesperBookSeries(
+                        id = id,
+                        name = name,
+                        count = item.optInt("numBooks", item.optInt("bookCount", 0)),
+                    )
+                }
+            }
+        }
+
+        val deduped = allItems.distinctBy { it.itemId }
+        return VesperBookHomeSnapshot(
+            continueListening = continueListening.distinctBy { it.itemId },
+            continueReading = continueReading.distinctBy { it.itemId },
+            recentlyAdded = recentlyAdded.distinctBy { it.itemId },
+            discover = discover.distinctBy { it.itemId },
+            audiobooks = deduped.filter { it.hasAudio }.take(24),
+            ebooks = deduped.filter { it.hasEbook }.take(24),
+            authors = authors.distinctBy { it.id },
+            series = series.distinctBy { it.id },
+        )
+    }
+
+    fun loadItem(itemId: String): VesperBookItem {
+        val response = request("/api/items/${encodePath(itemId)}?expanded=1&include=progress")
+        return parseBookItem(response)
+            ?: throw IllegalStateException("Book details are unavailable.")
+    }
+
     fun search(query: String, limit: Int = 12): List<VesperBookLibraryResult> {
         val clean = query.trim()
         if (clean.length < 2) return emptyList()
@@ -361,7 +519,62 @@ internal class AudiobookshelfLibraryClient(
         return results
     }
 
-    private fun request(path: String): JSONObject {
+    private fun parseBookItem(libraryItem: JSONObject): VesperBookItem? {
+        val media = libraryItem.optJSONObject("media") ?: return null
+        val metadata = media.optJSONObject("metadata") ?: JSONObject()
+        val itemId = libraryItem.optString("id").trim()
+        val title = metadata.optString("title").trim()
+        if (itemId.isBlank() || title.isBlank()) return null
+
+        val author = metadata.optString("authorName").trim()
+            .ifBlank {
+                val arr = metadata.optJSONArray("authors") ?: JSONArray()
+                buildList {
+                    for (index in 0 until arr.length()) {
+                        arr.optJSONObject(index)?.optString("name")?.trim()
+                            ?.takeIf { it.isNotBlank() }?.let(::add)
+                    }
+                }.joinToString(", ")
+            }
+            .ifBlank { "Unknown author" }
+
+        val progressObject = libraryItem.optJSONObject("userMediaProgress")
+        val progress = progressObject?.let {
+            when {
+                it.optDouble("ebookProgress", 0.0) > 0 -> it.optDouble("ebookProgress", 0.0)
+                it.optDouble("progress", 0.0) > 0 -> it.optDouble("progress", 0.0)
+                it.optDouble("duration", 0.0) > 0 ->
+                    (it.optDouble("currentTime", 0.0) / it.optDouble("duration", 1.0)).coerceIn(0.0, 1.0)
+                else -> null
+            }
+        }
+
+        val coverUrl = "$root/api/items/${encodePath(itemId)}/cover?token=${encode(token)}"
+        return VesperBookItem(
+            itemId = itemId,
+            libraryId = libraryItem.optString("libraryId"),
+            title = title,
+            subtitle = metadata.optString("subtitle").takeIf { it.isNotBlank() && it != "null" },
+            author = author,
+            narrator = metadata.optString("narratorName").takeIf { it.isNotBlank() && it != "null" },
+            description = metadata.optString("descriptionPlain")
+                .takeIf { it.isNotBlank() && it != "null" }
+                ?: metadata.optString("description").takeIf { it.isNotBlank() && it != "null" },
+            series = metadata.optString("seriesName").takeIf { it.isNotBlank() && it != "null" },
+            publishedYear = metadata.optString("publishedYear").takeIf { it.isNotBlank() && it != "null" },
+            coverUrl = coverUrl,
+            hasAudio = media.optInt("numTracks", media.optInt("numAudioFiles", 0)) > 0,
+            hasEbook = media.optString("ebookFormat").isNotBlank(),
+            durationSeconds = media.optDouble("duration", 0.0).toInt(),
+            addedAt = libraryItem.optLong("addedAt", 0L),
+            progress = progress,
+        )
+    }
+
+    private fun request(path: String): JSONObject =
+        requestAny(path) as? JSONObject ?: JSONObject()
+
+    private fun requestAny(path: String): Any? {
         require(root.isNotBlank()) { "Audiobook Library URL is missing." }
         require(token.isNotBlank()) { "Audiobook Library token is missing." }
 
@@ -382,7 +595,8 @@ internal class AudiobookshelfLibraryClient(
             if (status !in 200..299) {
                 throw IllegalStateException("Audiobook Library returned HTTP $status")
             }
-            return if (payload.isBlank()) JSONObject() else JSONObject(payload)
+            if (payload.isBlank()) return JSONObject()
+            return JSONTokener(payload).nextValue()
         } finally {
             connection.disconnect()
         }
