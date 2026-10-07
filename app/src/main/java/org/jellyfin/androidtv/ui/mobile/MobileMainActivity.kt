@@ -211,6 +211,8 @@ class MobileMainActivity : FragmentActivity() {
                 onPlayMusic = ::playMusic,
                 onControlMusic = ::controlMusic,
                 onSeekMusic = ::seekMusic,
+                onLoadMusicQueue = ::loadMusicQueue,
+                onPlayMusicQueueItem = ::playMusicQueueItem,
                 onUpdateMusicGroup = ::updateMusicGroup,
                 onSettings = ::openSettings,
             )
@@ -1033,6 +1035,39 @@ class MobileMainActivity : FragmentActivity() {
         }
     }
 
+    private suspend fun loadMusicQueue(player: MaPlayer): List<MaQueueItem> {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return emptyList()
+        return withContext(Dispatchers.IO) {
+            MusicAssistantClient(
+                baseUrl = musicAssistantBaseUrl,
+                token = musicAssistantToken,
+            ).loadQueue(player.queueId)
+        }
+    }
+
+    private fun playMusicQueueItem(item: MaQueueItem) {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    MusicAssistantClient(
+                        baseUrl = musicAssistantBaseUrl,
+                        token = musicAssistantToken,
+                    ).playQueueItem(item.queueId, item.queueItemId)
+                }
+            }.onSuccess {
+                delay(350)
+                refreshMusicPlayers()
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    error.message ?: "Couldn't play that queue item.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
     private fun updateMusicGroup(
         player: MaPlayer,
         selectedPlayerIds: Set<String>,
@@ -1384,6 +1419,8 @@ private fun VesperMobile(
     onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControlMusic: (MaPlayer, MusicPlayerAction) -> Unit,
     onSeekMusic: (MaPlayer, Int) -> Unit,
+    onLoadMusicQueue: suspend (MaPlayer) -> List<MaQueueItem>,
+    onPlayMusicQueueItem: (MaQueueItem) -> Unit,
     onUpdateMusicGroup: (MaPlayer, Set<String>) -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -1572,6 +1609,8 @@ private fun VesperMobile(
                     onSeek = { player, position ->
                         onSeekMusic(player, position)
                     },
+                    onLoadQueue = onLoadMusicQueue,
+                    onPlayQueueItem = onPlayMusicQueueItem,
                     onRooms = { player ->
                         nowPlayingRoomsPlayerId = player.playerId
                     },
@@ -1751,6 +1790,8 @@ private fun VesperNowPlaying(
     onDismiss: () -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onSeek: (MaPlayer, Int) -> Unit,
+    onLoadQueue: suspend (MaPlayer) -> List<MaQueueItem>,
+    onPlayQueueItem: (MaQueueItem) -> Unit,
     onRooms: (MaPlayer) -> Unit,
 ) {
     if (players.isEmpty()) return
@@ -1766,6 +1807,7 @@ private fun VesperNowPlaying(
     val safeIndex = currentIndex.coerceIn(0, players.lastIndex)
     if (safeIndex != currentIndex) currentIndex = safeIndex
     val player = players[safeIndex]
+    var queueOpen by remember(player.queueId) { mutableStateOf(false) }
 
     Popup(
         alignment = Alignment.Center,
@@ -1793,7 +1835,18 @@ private fun VesperNowPlaying(
             }.coerceAtLeast(1)
             val roomLabel = if (roomCount > 1) "$roomCount rooms" else player.name
 
-            Column(
+            if (queueOpen) {
+                MusicQueueView(
+                    player = player,
+                    onBack = { queueOpen = false },
+                    onLoadQueue = onLoadQueue,
+                    onPlayQueueItem = { item ->
+                        onPlayQueueItem(item)
+                        queueOpen = false
+                    },
+                )
+            } else {
+                Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(queueIds, currentIndex) {
@@ -2038,6 +2091,22 @@ private fun VesperNowPlaying(
                         )
                     }
 
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFF141A25))
+                            .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
+                            .clickable { queueOpen = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(
+                            "Queue",
+                            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+
                     if (player.volumeLevel != null) {
                         Box(
                             modifier = Modifier
@@ -2066,6 +2135,172 @@ private fun VesperNowPlaying(
                                         .clickable { onControl(player, MusicPlayerAction.VOLUME_UP) }
                                         .padding(horizontal = 12.dp, vertical = 8.dp),
                                     style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicQueueView(
+    player: MaPlayer,
+    onBack: () -> Unit,
+    onLoadQueue: suspend (MaPlayer) -> List<MaQueueItem>,
+    onPlayQueueItem: (MaQueueItem) -> Unit,
+) {
+    var loading by remember(player.queueId) { mutableStateOf(true) }
+    var error by remember(player.queueId) { mutableStateOf<String?>(null) }
+    var queue by remember(player.queueId) { mutableStateOf<List<MaQueueItem>>(emptyList()) }
+
+    LaunchedEffect(player.queueId) {
+        loading = true
+        error = null
+        runCatching { onLoadQueue(player) }
+            .onSuccess { queue = it.sortedBy(MaQueueItem::index) }
+            .onFailure { error = it.message ?: "Couldn't load the queue." }
+        loading = false
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(21.dp))
+                    .background(Color(0x22FFFFFF))
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText("‹", style = TextStyle(color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                BasicText(
+                    "Queue",
+                    style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold),
+                )
+                BasicText(
+                    player.name,
+                    style = TextStyle(color = Color(0xFF8F98A5), fontSize = 12.sp),
+                )
+            }
+            BasicText(
+                if (queue.isEmpty()) "" else "${queue.size} tracks",
+                style = TextStyle(color = Color(0xFF8F98A5), fontSize = 11.sp),
+            )
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        when {
+            loading -> {
+                BasicText(
+                    "Loading queue…",
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
+                )
+            }
+            error != null -> {
+                BasicText(
+                    error.orEmpty(),
+                    style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 13.sp),
+                )
+            }
+            queue.isEmpty() -> {
+                BasicText(
+                    "Nothing else is queued.",
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
+                )
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    items(queue, key = { it.queueItemId }) { item ->
+                        val current = player.queueCurrentIndex == item.index
+                        val played = player.queueCurrentIndex?.let { item.index < it } == true
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    when {
+                                        current -> Color(0x332F235D)
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .clickable(enabled = !current && !played) {
+                                    onPlayQueueItem(item)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(Color(0xFF111A23)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (!item.imageUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        modifier = Modifier.fillMaxSize(),
+                                        url = item.imageUrl,
+                                        scaleType = ImageView.ScaleType.CENTER_CROP,
+                                    )
+                                } else {
+                                    BasicText(
+                                        "♫",
+                                        style = TextStyle(color = Color(0xFFA98CFF), fontSize = 20.sp, fontWeight = FontWeight.Bold),
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(11.dp))
+                            Column(Modifier.weight(1f)) {
+                                BasicText(
+                                    item.name,
+                                    style = TextStyle(
+                                        color = when {
+                                            current -> Color.White
+                                            played -> Color(0xFF666D78)
+                                            else -> Color(0xFFE0E5EA)
+                                        },
+                                        fontSize = 13.sp,
+                                        fontWeight = if (current) FontWeight.Bold else FontWeight.Medium,
+                                    ),
+                                    maxLines = 1,
+                                )
+                                if (!item.artist.isNullOrBlank()) {
+                                    BasicText(
+                                        item.artist,
+                                        style = TextStyle(
+                                            color = if (played) Color(0xFF555B64) else Color(0xFF89929E),
+                                            fontSize = 10.sp,
+                                        ),
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                            item.duration?.takeIf { it > 0 }?.let { duration ->
+                                BasicText(
+                                    formatPlaybackTime(duration),
+                                    style = TextStyle(color = Color(0xFF727B87), fontSize = 10.sp),
+                                )
+                            }
+                            if (current) {
+                                Spacer(Modifier.width(8.dp))
+                                BasicText(
+                                    "NOW",
+                                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 9.sp, fontWeight = FontWeight.Bold),
                                 )
                             }
                         }
