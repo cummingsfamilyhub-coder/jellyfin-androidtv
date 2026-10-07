@@ -130,6 +130,7 @@ class MobileMainActivity : FragmentActivity() {
     private var state by mutableStateOf(MobileHomeState())
     private var popularity by mutableStateOf(PopularityState())
     private var musicState by mutableStateOf(MusicUiState())
+    private var booksState by mutableStateOf(BooksUiState())
     private var selected by mutableStateOf<BaseItemDto?>(null)
     private var tmdbApiKey by mutableStateOf("")
     private var seerrApiKey by mutableStateOf("")
@@ -195,6 +196,8 @@ class MobileMainActivity : FragmentActivity() {
                 popularityScope = popularityScope,
                 musicState = musicState,
                 musicConfigured = musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank(),
+                booksState = booksState,
+                booksConfigured = audiobookLibraryUrl.isNotBlank() && audiobookLibraryToken.isNotBlank(),
                 showPersistentMiniPlayer = showPersistentMiniPlayer,
                 tmdbConfigured = tmdbApiKey.isNotBlank(),
                 selected = selected,
@@ -221,13 +224,18 @@ class MobileMainActivity : FragmentActivity() {
                 onBookLibrarySearch = ::searchBookLibrary,
                 onBookRequestSearch = ::searchBookRequests,
                 onBookRequest = ::requestBook,
+                onRetryBooks = ::loadBooks,
+                onLoadBookDetails = ::loadBookDetails,
                 onSelect = { selected = it },
                 onBack = { selected = null },
                 onRetry = ::loadHome,
                 onPlay = ::playItem,
                 onToggleFavorite = ::toggleFavorite,
                 onSwitchProfile = ::switchProfile,
-                onTabSelected = ::loadLibraryTab,
+                onTabSelected = { tab ->
+                    loadLibraryTab(tab)
+                    if (tab == MobileTab.BOOKS) loadBooks()
+                },
                 onRetryMusic = ::loadMusic,
                 onPlayMusic = ::playMusic,
                 onControlMusic = ::controlMusic,
@@ -869,6 +877,66 @@ class MobileMainActivity : FragmentActivity() {
         )
     }
 
+    private fun loadBooks() {
+        if (audiobookLibraryUrl.isBlank() || audiobookLibraryToken.isBlank()) {
+            booksState = BooksUiState()
+            return
+        }
+        if (!booksState.loaded) {
+            booksState = booksState.copy(loading = true, error = null)
+        }
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    AudiobookshelfLibraryClient(
+                        baseUrl = audiobookLibraryUrl,
+                        token = audiobookLibraryToken,
+                    ).loadHome()
+                }
+            }.onSuccess { snapshot ->
+                booksState = BooksUiState(
+                    loaded = true,
+                    snapshot = snapshot,
+                )
+            }.onFailure { error ->
+                booksState = if (booksState.loaded) {
+                    booksState.copy(loading = false, error = null)
+                } else {
+                    BooksUiState(
+                        error = booksConnectionError(error),
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun loadBookDetails(itemId: String): VesperBookItem =
+        withContext(Dispatchers.IO) {
+            AudiobookshelfLibraryClient(
+                baseUrl = audiobookLibraryUrl,
+                token = audiobookLibraryToken,
+            ).loadItem(itemId)
+        }
+
+    private fun booksConnectionError(error: Throwable): String {
+        val url = audiobookLibraryUrl.trim()
+        val host = runCatching { java.net.URI(url).host.orEmpty() }.getOrDefault("")
+        val localOnly =
+            url.startsWith("http://") &&
+                (
+                    host.startsWith("192.168.") ||
+                        host.startsWith("10.") ||
+                        host.startsWith("172.") ||
+                        host == "localhost" ||
+                        host.endsWith(".local")
+                )
+        return if (localOnly) {
+            "Books Away isn't set up yet. Vesper is still using your home-only book library address."
+        } else {
+            friendlyServiceError("Books", error)
+        }
+    }
+
     private fun loadMusic() {
         if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) {
             musicState = MusicUiState(
@@ -1251,6 +1319,13 @@ private data class MusicUiState(
     val snapshot: MusicAssistantSnapshot = MusicAssistantSnapshot(),
 )
 
+private data class BooksUiState(
+    val loading: Boolean = false,
+    val loaded: Boolean = false,
+    val error: String? = null,
+    val snapshot: VesperBookHomeSnapshot = VesperBookHomeSnapshot(),
+)
+
 private data class PopularityState(
     val localMovies: Map<String, Int> = emptyMap(),
     val localShows: Map<String, Int> = emptyMap(),
@@ -1509,6 +1584,8 @@ private fun VesperMobile(
     popularityScope: PopularityScope,
     musicState: MusicUiState,
     musicConfigured: Boolean,
+    booksState: BooksUiState,
+    booksConfigured: Boolean,
     showPersistentMiniPlayer: Boolean,
     tmdbConfigured: Boolean,
     selected: BaseItemDto?,
@@ -1528,6 +1605,8 @@ private fun VesperMobile(
     onBookLibrarySearch: suspend (String) -> List<VesperBookLibraryResult>,
     onBookRequestSearch: suspend (String) -> List<VesperBookRequestResult>,
     onBookRequest: suspend (VesperBookRequestResult, Boolean) -> String?,
+    onRetryBooks: () -> Unit,
+    onLoadBookDetails: suspend (String) -> VesperBookItem,
     onSelect: (BaseItemDto) -> Unit,
     onBack: () -> Unit,
     onRetry: () -> Unit,
@@ -1634,8 +1713,12 @@ private fun VesperMobile(
                     onSettings = onSettings,
                 )
                 MobileTab.BOOKS -> BooksHub(
+                    state = booksState,
+                    configured = booksConfigured,
                     userName = userName,
                     userAvatarUrl = userAvatarUrl,
+                    onRetry = onRetryBooks,
+                    onLoadDetails = onLoadBookDetails,
                     onSwitchProfile = onSwitchProfile,
                     onSettings = onSettings,
                 )
