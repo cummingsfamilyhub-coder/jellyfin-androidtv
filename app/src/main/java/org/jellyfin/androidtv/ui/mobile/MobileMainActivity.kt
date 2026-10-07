@@ -6593,6 +6593,32 @@ private fun SearchBookRequestCard(
 }
 
 @Composable
+private fun RequestFormatButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(RoundedCornerShape(17.dp))
+            .background(if (enabled) Color(0xFFEAF6FC) else Color(0xFF17232D))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(
+                color = if (enabled) Color(0xFF071017) else Color(0xFFD4DDE5),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
+    }
+}
+
+@Composable
 private fun SeerrMediaCard(
     item: SeerrSearchResult,
     onRequest: suspend (SeerrSearchResult) -> String?,
