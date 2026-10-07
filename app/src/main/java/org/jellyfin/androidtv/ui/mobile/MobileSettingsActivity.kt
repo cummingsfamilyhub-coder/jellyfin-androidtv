@@ -250,9 +250,9 @@ class MobileSettingsActivity : FragmentActivity() {
                             onSuccess = { endpoint ->
                                 musicAssistantConnectionVerified = true
                                 musicAssistantConnectionMessage = if (endpoint.remoteReady) {
-                                    "Music Assistant API connected over HTTPS."
+                                    "Music is ready at home and away."
                                 } else {
-                                    "Music Assistant API connected. This address is local-only."
+                                    "Music is connected, but this address only works at home."
                                 }
                                 preferences.edit()
                                     .putString("music_assistant_url", endpoint.baseUrl)
@@ -264,7 +264,7 @@ class MobileSettingsActivity : FragmentActivity() {
                             onFailure = { failure ->
                                 musicAssistantConnectionVerified = false
                                 musicAssistantConnectionMessage =
-                                    failure.message ?: "Music Assistant connection failed."
+                                    failure.message ?: "Music connection failed."
                                 preferences.edit()
                                     .putBoolean("music_assistant_connection_verified", false)
                                     .apply()
@@ -893,11 +893,11 @@ private fun SettingsHome(
                 SettingsDivider()
                 SettingsNavigationRow(
                     icon = "♫",
-                    title = "Music Assistant",
-                    subtitle = "Music library, rooms and playback",
+                    title = "Music",
+                    subtitle = "Library, rooms, playback and Music Away",
                     status = when {
-                        musicAssistantVerified && musicAssistantRemoteReady -> "HTTPS ready"
-                        musicAssistantVerified -> "Local only"
+                        musicAssistantVerified && musicAssistantRemoteReady -> "Away ready"
+                        musicAssistantVerified -> "Home only"
                         musicAssistantConfigured -> "Configured"
                         else -> "Needs setup"
                     },
@@ -1834,28 +1834,28 @@ private fun MusicAssistantSettingsPage(
     }
 
     SettingsDetailScaffold(
-        title = "Music Assistant",
+        title = "Music",
         onBack = onBack,
     ) {
         SettingsInfoCard(
-            title = if (endpoint?.remoteReady == true) "Canonical HTTPS endpoint" else "Local Music Assistant endpoint",
+            title = if (endpoint?.remoteReady == true) "Music Anywhere" else "Home-only music",
             value = endpoint?.baseUrl ?: url.ifBlank { "Not configured" },
             helper = if (endpoint?.remoteReady == true) {
-                "Vesper will use this same secure host for the MA API and This Device playback."
+                "Vesper will use this same secure address on Wi-Fi and mobile data, including This Device playback."
             } else {
-                "This address only works on your home network. Use an HTTPS endpoint for Music Anywhere."
+                "This private address only works at home. Add your secure HTTPS Music address to use Vesper away from home."
             },
         )
         Spacer(Modifier.height(16.dp))
         SettingsField(
-            label = "Server URL",
+            label = "Music URL",
             value = url,
             onValueChange = { url = it },
-            placeholder = "https://music.example.com",
+            placeholder = "https://vesper-music.duckdns.org",
         )
         Spacer(Modifier.height(14.dp))
         SettingsField(
-            label = "Access token",
+            label = "Music access token",
             value = token,
             onValueChange = { token = it },
             placeholder = "Music Assistant token",
