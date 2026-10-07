@@ -4793,7 +4793,7 @@ private fun BookDetailsPopup(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth(percent / 100f)
-                                        .fillMaxHeight()
+                                        .height(5.dp)
                                         .background(Color(0xFFA98CFF)),
                                 )
                             }
