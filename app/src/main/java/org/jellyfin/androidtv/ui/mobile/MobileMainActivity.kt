@@ -6455,6 +6455,144 @@ private fun SearchMusicRequestCard(
 }
 
 @Composable
+private fun SearchBookLibraryCard(
+    item: VesperBookLibraryResult,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xFF1B1931),
+                            Color(0xFF111927),
+                            Color(0xFF0B1018),
+                        )
+                    )
+                )
+                .border(1.dp, Color(0x333D4F73), RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                "▤",
+                style = TextStyle(
+                    color = Color(0xFFC6B8FF),
+                    fontSize = 44.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0xDD173D2A))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+            ) {
+                BasicText(
+                    "AVAILABLE",
+                    style = TextStyle(color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        BasicText(
+            item.title,
+            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 14.sp),
+            maxLines = 2,
+        )
+        BasicText(
+            "${item.author} · ${item.mediaKind}",
+            style = TextStyle(color = Color(0xFF89929E), fontSize = 10.sp),
+            maxLines = 2,
+        )
+    }
+}
+
+private fun bookRequestState(status: String?): String? {
+    val normalized = status.orEmpty().trim().lowercase()
+    return when {
+        normalized.isBlank() || normalized == "open" || normalized == "skipped" -> null
+        "have" in normalized || "downloaded" in normalized -> "Available"
+        "wanted" in normalized || "snatched" in normalized || "queued" in normalized -> "Requested"
+        else -> null
+    }
+}
+
+@Composable
+private fun SearchBookRequestCard(
+    item: VesperBookRequestResult,
+    onOpen: () -> Unit,
+) {
+    val bookState = bookRequestState(item.ebookStatus)
+    val audioState = bookRequestState(item.audiobookStatus)
+    val badge = when {
+        bookState == "Available" || audioState == "Available" -> "AVAILABLE"
+        bookState == "Requested" || audioState == "Requested" -> "REQUESTED"
+        else -> "REQUEST"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF111A23)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = item.coverUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    "▤",
+                    style = TextStyle(color = Color(0xFFC6B8FF), fontSize = 44.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(
+                        if (badge == "AVAILABLE") Color(0xDD173D2A)
+                        else Color(0xDD26305C)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+            ) {
+                BasicText(
+                    badge,
+                    style = TextStyle(color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        BasicText(
+            item.title,
+            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 14.sp),
+            maxLines = 2,
+        )
+        BasicText(
+            item.author,
+            style = TextStyle(color = Color(0xFF89929E), fontSize = 10.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun SeerrMediaCard(
     item: SeerrSearchResult,
     onRequest: suspend (SeerrSearchResult) -> String?,
