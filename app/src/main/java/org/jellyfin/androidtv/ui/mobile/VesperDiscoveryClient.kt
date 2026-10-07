@@ -366,14 +366,9 @@ internal class AudiobookshelfLibraryClient(
         val series = mutableListOf<VesperBookSeries>()
 
         for (libraryId in bookLibraries) {
-            val shelves = request(
+            val shelves = requestAny(
                 "/api/libraries/${encodePath(libraryId)}/personalized?limit=$limitPerShelf"
-            ).optJSONArray("items") ?: run {
-                val raw = requestAny(
-                    "/api/libraries/${encodePath(libraryId)}/personalized?limit=$limitPerShelf"
-                )
-                raw as? JSONArray ?: JSONArray()
-            }
+            ) as? JSONArray ?: JSONArray()
 
             for (index in 0 until shelves.length()) {
                 val shelf = shelves.optJSONObject(index) ?: continue
@@ -499,7 +494,7 @@ internal class AudiobookshelfLibraryClient(
                     .ifBlank { "Unknown author" }
 
                 val audioFiles = media.optInt("numAudioFiles", 0)
-                val ebookFormat = media.optString("ebookFileFormat").trim()
+                val ebookFormat = media.optString("ebookFormat").trim()
                 val kind = when {
                     audioFiles > 0 && ebookFormat.isNotBlank() -> "Audiobook + eBook"
                     audioFiles > 0 -> "Audiobook"
