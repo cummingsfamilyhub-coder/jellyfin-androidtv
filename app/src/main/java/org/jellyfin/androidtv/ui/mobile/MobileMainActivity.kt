@@ -5810,36 +5810,69 @@ private fun GenreChip(
     }
 }
 
+private enum class SearchScope(val label: String) {
+    ALL("All"),
+    VIDEO("Video"),
+    MUSIC("Music"),
+    BOOKS("Books"),
+}
+
 @Composable
 private fun SearchBrowse(
     state: MobileHomeState,
     api: ApiClient,
-    seerrConfigured: Boolean,
+    videoRequestsConfigured: Boolean,
+    musicLibraryConfigured: Boolean,
+    musicRequestsConfigured: Boolean,
+    bookRequestsConfigured: Boolean,
+    audiobookLibraryConfigured: Boolean,
     onLibrarySearch: suspend (String) -> List<BaseItemDto>,
-    onSeerrSearch: suspend (String) -> List<SeerrSearchResult>,
-    onSeerrRequest: suspend (SeerrSearchResult) -> String?,
+    onVideoRequestSearch: suspend (String) -> List<SeerrSearchResult>,
+    onVideoRequest: suspend (SeerrSearchResult) -> String?,
+    onMusicLibrarySearch: suspend (String) -> MaSearchResults,
+    onMusicRequestSearch: suspend (String) -> List<VesperMusicRequestResult>,
+    onMusicRequest: suspend (VesperMusicRequestResult) -> String?,
+    onBookLibrarySearch: suspend (String) -> List<VesperBookLibraryResult>,
+    onBookRequestSearch: suspend (String) -> List<VesperBookRequestResult>,
+    onBookRequest: suspend (VesperBookRequestResult, Boolean) -> String?,
     onSelect: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
     expanded: Boolean,
 ) {
     var query by remember { mutableStateOf("") }
-    var localSearchResults by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
-    var localSearchLoading by remember { mutableStateOf(false) }
-    var localSearchError by remember { mutableStateOf<String?>(null) }
-    var seerrResults by remember { mutableStateOf<List<SeerrSearchResult>>(emptyList()) }
-    var seerrLoading by remember { mutableStateOf(false) }
-    var seerrError by remember { mutableStateOf<String?>(null) }
-    var seerrRefresh by remember { mutableStateOf(0) }
-    var selectedRequestItem by remember { mutableStateOf<SeerrSearchResult?>(null) }
+    var scope by remember { mutableStateOf(SearchScope.ALL) }
 
-    val all = remember(state) {
+    var localVideoResults by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
+    var videoRequestResults by remember { mutableStateOf<List<SeerrSearchResult>>(emptyList()) }
+    var videoLoading by remember { mutableStateOf(false) }
+    var videoRequestLoading by remember { mutableStateOf(false) }
+    var videoError by remember { mutableStateOf<String?>(null) }
+    var videoRequestError by remember { mutableStateOf<String?>(null) }
+    var videoRefresh by remember { mutableStateOf(0) }
+    var selectedVideoRequest by remember { mutableStateOf<SeerrSearchResult?>(null) }
+
+    var musicLibraryResults by remember { mutableStateOf(MaSearchResults()) }
+    var musicRequestResults by remember { mutableStateOf<List<VesperMusicRequestResult>>(emptyList()) }
+    var musicLoading by remember { mutableStateOf(false) }
+    var musicRequestLoading by remember { mutableStateOf(false) }
+    var musicError by remember { mutableStateOf<String?>(null) }
+    var musicRequestError by remember { mutableStateOf<String?>(null) }
+
+    var bookLibraryResults by remember { mutableStateOf<List<VesperBookLibraryResult>>(emptyList()) }
+    var bookRequestResults by remember { mutableStateOf<List<VesperBookRequestResult>>(emptyList()) }
+    var booksLoading by remember { mutableStateOf(false) }
+    var bookRequestLoading by remember { mutableStateOf(false) }
+    var booksError by remember { mutableStateOf<String?>(null) }
+    var bookRequestError by remember { mutableStateOf<String?>(null) }
+
+    val browseVideo = remember(state) {
         (state.continueWatching + state.myV + state.movies + state.shows)
             .distinctBy { it.id }
     }
     val cleanQuery = query.trim()
-    val localResults = when {
-        cleanQuery.isBlank() -> all
-        cleanQuery.length < 2 -> all.filter { item ->
+    val visibleLocalVideo = when {
+        cleanQuery.isBlank() -> browseVideo
+        cleanQuery.length < 2 -> browseVideo.filter { item ->
             val haystack = listOfNotNull(
                 item.name,
                 item.seriesName,
@@ -5847,10 +5880,10 @@ private fun SearchBrowse(
             ).joinToString(" ").lowercase()
             haystack.contains(cleanQuery.lowercase())
         }
-        else -> localSearchResults
+        else -> localVideoResults
     }
-    val localTmdbKeys = remember(localResults) {
-        localResults.mapNotNull { item ->
+    val localTmdbKeys = remember(visibleLocalVideo) {
+        visibleLocalVideo.mapNotNull { item ->
             val mediaType = when (item.type) {
                 BaseItemKind.MOVIE -> "movie"
                 BaseItemKind.SERIES -> "tv"
@@ -5860,54 +5893,133 @@ private fun SearchBrowse(
             if (mediaType != null && tmdbId != null) "${mediaType}:${tmdbId}" else null
         }.toSet()
     }
-    val remoteResults = seerrResults.filterNot {
+    val visibleVideoRequests = videoRequestResults.filterNot {
         "${it.mediaType}:${it.tmdbId}" in localTmdbKeys
     }
 
-    LaunchedEffect(query, seerrConfigured, seerrRefresh) {
+    LaunchedEffect(
+        query,
+        scope,
+        videoRequestsConfigured,
+        musicLibraryConfigured,
+        musicRequestsConfigured,
+        bookRequestsConfigured,
+        audiobookLibraryConfigured,
+        videoRefresh,
+    ) {
         val requestedQuery = query.trim()
         if (requestedQuery.length < 2) {
-            localSearchResults = emptyList()
-            localSearchLoading = false
-            localSearchError = null
-            seerrResults = emptyList()
-            seerrLoading = false
-            seerrError = null
+            localVideoResults = emptyList()
+            videoRequestResults = emptyList()
+            musicLibraryResults = MaSearchResults()
+            musicRequestResults = emptyList()
+            bookLibraryResults = emptyList()
+            bookRequestResults = emptyList()
+            videoLoading = false
+            videoRequestLoading = false
+            musicLoading = false
+            musicRequestLoading = false
+            booksLoading = false
+            bookRequestLoading = false
+            videoError = null
+            videoRequestError = null
+            musicError = null
+            musicRequestError = null
+            booksError = null
+            bookRequestError = null
             return@LaunchedEffect
         }
 
         delay(350)
-        localSearchLoading = true
-        localSearchError = null
-        seerrLoading = seerrConfigured
-        seerrError = null
 
-        val localDeferred = async {
-            runCatching { onLibrarySearch(requestedQuery) }
-        }
-        val seerrDeferred = if (seerrConfigured) {
-            async { runCatching { onSeerrSearch(requestedQuery) } }
+        val wantsVideo = scope == SearchScope.ALL || scope == SearchScope.VIDEO
+        val wantsMusic = scope == SearchScope.ALL || scope == SearchScope.MUSIC
+        val wantsBooks = scope == SearchScope.ALL || scope == SearchScope.BOOKS
+
+        videoLoading = wantsVideo
+        videoRequestLoading = wantsVideo && videoRequestsConfigured
+        musicLoading = wantsMusic && musicLibraryConfigured
+        musicRequestLoading = wantsMusic && musicRequestsConfigured
+        booksLoading = wantsBooks && audiobookLibraryConfigured
+        bookRequestLoading = wantsBooks && bookRequestsConfigured
+
+        videoError = null
+        videoRequestError = null
+        musicError = null
+        musicRequestError = null
+        booksError = null
+        bookRequestError = null
+
+        val localVideoDeferred = if (wantsVideo) async { runCatching { onLibrarySearch(requestedQuery) } } else null
+        val videoRequestDeferred = if (wantsVideo && videoRequestsConfigured) {
+            async { runCatching { onVideoRequestSearch(requestedQuery) } }
+        } else null
+        val musicLibraryDeferred = if (wantsMusic && musicLibraryConfigured) {
+            async { runCatching { onMusicLibrarySearch(requestedQuery) } }
+        } else null
+        val musicRequestDeferred = if (wantsMusic && musicRequestsConfigured) {
+            async { runCatching { onMusicRequestSearch(requestedQuery) } }
+        } else null
+        val bookLibraryDeferred = if (wantsBooks && audiobookLibraryConfigured) {
+            async { runCatching { onBookLibrarySearch(requestedQuery) } }
+        } else null
+        val bookRequestDeferred = if (wantsBooks && bookRequestsConfigured) {
+            async { runCatching { onBookRequestSearch(requestedQuery) } }
         } else null
 
-        localDeferred.await()
-            .onSuccess { localSearchResults = it }
-            .onFailure {
-                localSearchResults = emptyList()
-                localSearchError = it.message ?: "Couldn't reach your media server."
-            }
-        localSearchLoading = false
+        localVideoDeferred?.await()?.fold(
+            onSuccess = { localVideoResults = it },
+            onFailure = {
+                localVideoResults = emptyList()
+                videoError = it.message ?: "Couldn't search your video library."
+            },
+        )
+        videoLoading = false
 
-        if (seerrDeferred != null) {
-            seerrDeferred.await()
-                .onSuccess { seerrResults = it }
-                .onFailure {
-                    seerrResults = emptyList()
-                    seerrError = it.message ?: "Couldn't reach media requests."
-                }
-        } else {
-            seerrResults = emptyList()
-        }
-        seerrLoading = false
+        videoRequestDeferred?.await()?.fold(
+            onSuccess = { videoRequestResults = it },
+            onFailure = {
+                videoRequestResults = emptyList()
+                videoRequestError = it.message ?: "Couldn't search video requests."
+            },
+        )
+        videoRequestLoading = false
+
+        musicLibraryDeferred?.await()?.fold(
+            onSuccess = { musicLibraryResults = it },
+            onFailure = {
+                musicLibraryResults = MaSearchResults()
+                musicError = it.message ?: "Couldn't search your music."
+            },
+        )
+        musicLoading = false
+
+        musicRequestDeferred?.await()?.fold(
+            onSuccess = { musicRequestResults = it },
+            onFailure = {
+                musicRequestResults = emptyList()
+                musicRequestError = it.message ?: "Couldn't search music requests."
+            },
+        )
+        musicRequestLoading = false
+
+        bookLibraryDeferred?.await()?.fold(
+            onSuccess = { bookLibraryResults = it },
+            onFailure = {
+                bookLibraryResults = emptyList()
+                booksError = it.message ?: "Couldn't search your audiobook library."
+            },
+        )
+        booksLoading = false
+
+        bookRequestDeferred?.await()?.fold(
+            onSuccess = { bookRequestResults = it },
+            onFailure = {
+                bookRequestResults = emptyList()
+                bookRequestError = it.message ?: "Couldn't search book requests."
+            },
+        )
+        bookRequestLoading = false
     }
 
     Column(
@@ -5945,64 +6057,133 @@ private fun SearchBrowse(
             )
         }
 
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(SearchScope.entries, key = { it.name }) { item ->
+                GenreChip(
+                    label = item.label,
+                    selected = scope == item,
+                    onClick = { scope = item },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
         LazyVerticalGrid(
             columns = GridCells.Fixed(if (expanded) 5 else 3),
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
-                top = 10.dp,
+                top = 8.dp,
                 bottom = 220.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(11.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            if (query.isBlank()) {
-                gridItems(localResults, key = { it.id }) { item ->
-                    GridMediaCard(item, api, onSelect, onToggleFavorite)
+            if (cleanQuery.isBlank()) {
+                if (scope == SearchScope.ALL || scope == SearchScope.VIDEO) {
+                    gridItems(visibleLocalVideo, key = { "browse-${it.id}" }) { item ->
+                        GridMediaCard(item, api, onSelect, onToggleFavorite)
+                    }
+                } else {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SearchEmptyPrompt(
+                            when (scope) {
+                                SearchScope.MUSIC -> "Search artists, albums and tracks."
+                                SearchScope.BOOKS -> "Search books and audiobooks."
+                                else -> "Search across Vesper."
+                            }
+                        )
+                    }
                 }
             } else {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    SearchSectionHeader(
-                        title = "In your library",
-                        subtitle = when {
-                            localSearchLoading -> "Searching…"
-                            localSearchError != null -> localSearchError.orEmpty()
-                            localResults.isEmpty() -> "No local matches"
-                            else -> "${localResults.size} found"
-                        },
-                    )
-                }
+                if (scope == SearchScope.ALL || scope == SearchScope.VIDEO) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SearchSectionHeader(
+                            title = "Video in your library",
+                            subtitle = when {
+                                videoLoading -> "Searching…"
+                                videoError != null -> videoError.orEmpty()
+                                visibleLocalVideo.isEmpty() -> "No local matches"
+                                else -> "${visibleLocalVideo.size} found"
+                            },
+                        )
+                    }
 
-                if (!localSearchLoading && localSearchError == null) {
-                    gridItems(localResults, key = { "local-${it.id}" }) { item ->
-                        GridMediaCard(item, api, onSelect, onToggleFavorite)
+                    if (!videoLoading && videoError == null) {
+                        gridItems(visibleLocalVideo, key = { "local-video-${it.id}" }) { item ->
+                            GridMediaCard(item, api, onSelect, onToggleFavorite)
+                        }
+                    }
+
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        SearchSectionHeader(
+                            title = "Request Video",
+                            subtitle = when {
+                                !videoRequestsConfigured -> "Video requests need setup"
+                                videoRequestLoading -> "Searching…"
+                                videoRequestError != null -> videoRequestError.orEmpty()
+                                visibleVideoRequests.isEmpty() -> "No additional matches"
+                                else -> "${visibleVideoRequests.size} found"
+                            },
+                        )
+                    }
+
+                    if (videoRequestsConfigured && !videoRequestLoading && videoRequestError == null) {
+                        gridItems(
+                            visibleVideoRequests,
+                            key = { "video-request-${it.mediaType}-${it.tmdbId}" },
+                        ) { item ->
+                            SeerrMediaCard(
+                                item = item,
+                                onRequest = onVideoRequest,
+                                onRequested = { videoRefresh++ },
+                                onOpenDetails = { selectedVideoRequest = it },
+                            )
+                        }
                     }
                 }
 
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    SearchSectionHeader(
-                        title = "Request Media",
-                        subtitle = when {
-                            !seerrConfigured -> "Media requests need setup"
-                            seerrLoading -> "Searching…"
-                            seerrError != null -> seerrError.orEmpty()
-                            remoteResults.isEmpty() && query.trim().length >= 2 -> "No additional matches"
-                            else -> "${remoteResults.size} found"
-                        },
-                    )
+                if (scope == SearchScope.ALL || scope == SearchScope.MUSIC) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        MusicLibrarySearchSection(
+                            items = musicLibraryResults.all,
+                            configured = musicLibraryConfigured,
+                            loading = musicLoading,
+                            error = musicError,
+                        )
+                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        MusicRequestSearchSection(
+                            items = musicRequestResults,
+                            configured = musicRequestsConfigured,
+                            loading = musicRequestLoading,
+                            error = musicRequestError,
+                            onRequest = onMusicRequest,
+                        )
+                    }
                 }
 
-                if (seerrConfigured && !seerrLoading && seerrError == null) {
-                    gridItems(
-                        remoteResults,
-                        key = { "seerr-${it.mediaType}-${it.tmdbId}" },
-                    ) { item ->
-                        SeerrMediaCard(
-                            item = item,
-                            onRequest = onSeerrRequest,
-                            onRequested = { seerrRefresh++ },
-                            onOpenDetails = { selectedRequestItem = it },
+                if (scope == SearchScope.ALL || scope == SearchScope.BOOKS) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        BookLibrarySearchSection(
+                            items = bookLibraryResults,
+                            configured = audiobookLibraryConfigured,
+                            loading = booksLoading,
+                            error = booksError,
+                        )
+                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        BookRequestSearchSection(
+                            items = bookRequestResults,
+                            configured = bookRequestsConfigured,
+                            loading = bookRequestLoading,
+                            error = bookRequestError,
+                            onRequest = onBookRequest,
                         )
                     }
                 }
@@ -6010,12 +6191,415 @@ private fun SearchBrowse(
         }
     }
 
-    selectedRequestItem?.let { item ->
+    selectedVideoRequest?.let { item ->
         MediaRequestDetailsPopup(
             item = item,
-            onDismiss = { selectedRequestItem = null },
-            onRequest = onSeerrRequest,
-            onRequested = { seerrRefresh++ },
+            onDismiss = { selectedVideoRequest = null },
+            onRequest = onVideoRequest,
+            onRequested = { videoRefresh++ },
+        )
+    }
+}
+
+@Composable
+private fun SearchEmptyPrompt(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 36.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            text,
+            style = TextStyle(color = Color(0xFF8B96A3), fontSize = 14.sp),
+        )
+    }
+}
+
+@Composable
+private fun MusicLibrarySearchSection(
+    items: List<MaMediaItem>,
+    configured: Boolean,
+    loading: Boolean,
+    error: String?,
+) {
+    SearchSectionHeader(
+        title = "In your music",
+        subtitle = when {
+            !configured -> "Music library needs setup"
+            loading -> "Searching…"
+            error != null -> error
+            items.isEmpty() -> "No local matches"
+            else -> "${items.size} found"
+        },
+    )
+    if (!configured || loading || error != null || items.isEmpty()) return
+
+    Spacer(Modifier.height(8.dp))
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(items.take(18), key = { "${it.mediaType}-${it.provider}-${it.itemId}-${it.uri}" }) { item ->
+            Column(modifier = Modifier.width(128.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(128.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(Color(0xFF111A23)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!item.imageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            modifier = Modifier.fillMaxSize(),
+                            url = item.imageUrl,
+                            scaleType = ImageView.ScaleType.CENTER_CROP,
+                        )
+                    } else {
+                        BasicText(
+                            "♫",
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 35.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(Color(0xCC05080C))
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                    ) {
+                        BasicText(
+                            item.mediaType.uppercase(),
+                            style = TextStyle(color = Color(0xFFBDEBFF), fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+                BasicText(
+                    item.name,
+                    style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                )
+                if (item.subtitle.isNotBlank()) {
+                    BasicText(
+                        item.subtitle,
+                        style = TextStyle(color = Color(0xFF7F8995), fontSize = 10.sp),
+                        maxLines = 1,
+                    )
+                }
+                BasicText(
+                    "Available",
+                    style = TextStyle(color = Color(0xFF8EDCB2), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicRequestSearchSection(
+    items: List<VesperMusicRequestResult>,
+    configured: Boolean,
+    loading: Boolean,
+    error: String?,
+    onRequest: suspend (VesperMusicRequestResult) -> String?,
+) {
+    SearchSectionHeader(
+        title = "Request Music",
+        subtitle = when {
+            !configured -> "Music requests need setup"
+            loading -> "Searching…"
+            error != null -> error
+            items.isEmpty() -> "No additional albums"
+            else -> "${items.size} albums found"
+        },
+    )
+    if (!configured || loading || error != null || items.isEmpty()) return
+
+    Spacer(Modifier.height(8.dp))
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(items.take(18), key = { it.albumMbid }) { item ->
+            MusicRequestCard(item = item, onRequest = onRequest)
+        }
+    }
+}
+
+@Composable
+private fun MusicRequestCard(
+    item: VesperMusicRequestResult,
+    onRequest: suspend (VesperMusicRequestResult) -> String?,
+) {
+    var requesting by remember(item.albumMbid) { mutableStateOf(false) }
+    var status by remember(item.albumMbid, item.status, item.inLibrary) {
+        mutableStateOf(
+            if (item.inLibrary || item.status == "available") "Available"
+            else if (item.status in setOf("searching", "queued", "monitored")) "Requested"
+            else "Request Album"
+        )
+    }
+    var error by remember(item.albumMbid) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val requestEnabled = status == "Request Album" && !requesting
+
+    Column(modifier = Modifier.width(146.dp)) {
+        Box(
+            modifier = Modifier
+                .size(146.dp)
+                .clip(RoundedCornerShape(15.dp))
+                .background(Color(0xFF111A23)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = item.coverUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    "♫",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 38.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        BasicText(
+            item.albumName,
+            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+            maxLines = 1,
+        )
+        BasicText(
+            item.artistName,
+            style = TextStyle(color = Color(0xFF7F8995), fontSize = 10.sp),
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (requestEnabled) Color(0xFFEAF6FC) else Color(0xFF17232D))
+                .clickable(enabled = requestEnabled) {
+                    requesting = true
+                    error = null
+                    scope.launch {
+                        val result = onRequest(item)
+                        requesting = false
+                        if (result == "Requested" || result == "Available") status = result
+                        else if (!result.isNullOrBlank()) error = result
+                    }
+                }
+                .padding(vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                if (requesting) "Requesting…" else status,
+                style = TextStyle(
+                    color = if (requestEnabled) Color(0xFF071017) else Color(0xFFD3DBE3),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+        }
+        if (!error.isNullOrBlank()) {
+            BasicText(
+                error.orEmpty(),
+                style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 8.sp),
+                maxLines = 2,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BookLibrarySearchSection(
+    items: List<VesperBookLibraryResult>,
+    configured: Boolean,
+    loading: Boolean,
+    error: String?,
+) {
+    SearchSectionHeader(
+        title = "In your books",
+        subtitle = when {
+            !configured -> "Audiobook library needs setup"
+            loading -> "Searching…"
+            error != null -> error
+            items.isEmpty() -> "No local matches"
+            else -> "${items.size} found"
+        },
+    )
+    if (!configured || loading || error != null || items.isEmpty()) return
+
+    Spacer(Modifier.height(8.dp))
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(items.take(18), key = { it.itemId }) { item ->
+            Column(
+                modifier = Modifier
+                    .width(155.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Color(0xFF111721))
+                    .padding(12.dp),
+            ) {
+                BasicText(
+                    "▤",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 28.sp, fontWeight = FontWeight.Bold),
+                )
+                Spacer(Modifier.height(12.dp))
+                BasicText(
+                    item.title,
+                    style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 2,
+                )
+                Spacer(Modifier.height(3.dp))
+                BasicText(
+                    item.author,
+                    style = TextStyle(color = Color(0xFF8A94A0), fontSize = 10.sp),
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(8.dp))
+                BasicText(
+                    "AVAILABLE · ${item.mediaKind.uppercase()}",
+                    style = TextStyle(color = Color(0xFF8EDCB2), fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookRequestSearchSection(
+    items: List<VesperBookRequestResult>,
+    configured: Boolean,
+    loading: Boolean,
+    error: String?,
+    onRequest: suspend (VesperBookRequestResult, Boolean) -> String?,
+) {
+    SearchSectionHeader(
+        title = "Request Books & Audiobooks",
+        subtitle = when {
+            !configured -> "Book requests need setup"
+            loading -> "Searching…"
+            error != null -> error
+            items.isEmpty() -> "No additional matches"
+            else -> "${items.size} found"
+        },
+    )
+    if (!configured || loading || error != null || items.isEmpty()) return
+
+    Spacer(Modifier.height(8.dp))
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(items.take(18), key = { it.bookId }) { item ->
+            BookRequestCard(item = item, onRequest = onRequest)
+        }
+    }
+}
+
+@Composable
+private fun BookRequestCard(
+    item: VesperBookRequestResult,
+    onRequest: suspend (VesperBookRequestResult, Boolean) -> String?,
+) {
+    var bookBusy by remember(item.bookId) { mutableStateOf(false) }
+    var audioBusy by remember(item.bookId) { mutableStateOf(false) }
+    var message by remember(item.bookId) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    Column(modifier = Modifier.width(162.dp)) {
+        Box(
+            modifier = Modifier
+                .width(162.dp)
+                .height(224.dp)
+                .clip(RoundedCornerShape(15.dp))
+                .background(Color(0xFF111A23)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = item.coverUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    "▤",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 45.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        BasicText(
+            item.title,
+            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+            maxLines = 2,
+        )
+        BasicText(
+            item.author,
+            style = TextStyle(color = Color(0xFF7F8995), fontSize = 10.sp),
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(7.dp))
+        SearchRequestButton(
+            label = if (bookBusy) "Requesting…" else "Book",
+            enabled = !bookBusy && !audioBusy,
+        ) {
+            bookBusy = true
+            message = null
+            scope.launch {
+                message = onRequest(item, false)
+                bookBusy = false
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        SearchRequestButton(
+            label = if (audioBusy) "Requesting…" else "Audiobook",
+            enabled = !bookBusy && !audioBusy,
+        ) {
+            audioBusy = true
+            message = null
+            scope.launch {
+                message = onRequest(item, true)
+                audioBusy = false
+            }
+        }
+        if (!message.isNullOrBlank()) {
+            Spacer(Modifier.height(4.dp))
+            BasicText(
+                message.orEmpty(),
+                style = TextStyle(
+                    color = if (message.orEmpty().contains("requested", ignoreCase = true)) {
+                        Color(0xFF8EDCB2)
+                    } else {
+                        Color(0xFFFFA6A6)
+                    },
+                    fontSize = 8.sp,
+                ),
+                maxLines = 2,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchRequestButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (enabled) Color(0xFFEAF6FC) else Color(0xFF252C35))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(
+                color = if (enabled) Color(0xFF071017) else Color(0xFF818A94),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+            ),
         )
     }
 }
