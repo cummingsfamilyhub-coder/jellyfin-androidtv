@@ -626,6 +626,18 @@ class MobileMainActivity : FragmentActivity() {
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
+    private fun musicConnectionError(error: Throwable): String {
+        val endpoint = runCatching {
+            VesperMusicEndpoint.from(musicAssistantBaseUrl)
+        }.getOrNull()
+
+        if (endpoint != null && !endpoint.remoteReady) {
+            return "Music Away isn't set up yet. Vesper is still using your home-only music address. " +
+                "Open Settings and switch Music to your secure HTTPS address."
+        }
+        return friendlyServiceError("Music", error)
+    }
+
     private fun friendlyServiceError(service: String, error: Throwable): String {
         if (!isNetworkAvailable()) return "No network connection. Check Wi-Fi or mobile data and try again."
 
@@ -890,7 +902,7 @@ class MobileMainActivity : FragmentActivity() {
                     musicState.copy(loading = false, error = null)
                 } else {
                     MusicUiState(
-                        error = error.message ?: "Couldn't load Music Assistant."
+                        error = musicConnectionError(error)
                     )
                 }
             }
@@ -2787,7 +2799,7 @@ private fun MusicConnectPanel(
     ) {
         Column {
             BasicText(
-                "MUSIC ASSISTANT",
+                "MUSIC",
                 style = TextStyle(
                     color = Color(0xFFA98CFF),
                     fontSize = 10.sp,
@@ -2802,11 +2814,11 @@ private fun MusicConnectPanel(
             )
             Spacer(Modifier.height(7.dp))
             BasicText(
-                "Vesper will use Music Assistant for your library, rooms, queues and playback.",
+                "Connect your music server for your library, rooms, queues and playback.",
                 style = TextStyle(color = Color(0xFFA7B1BD), fontSize = 13.sp, lineHeight = 18.sp),
             )
             Spacer(Modifier.height(16.dp))
-            VesperButton("Connect Music Assistant", onSettings)
+            VesperButton("Music Settings", onSettings)
         }
     }
 }
@@ -2829,7 +2841,7 @@ private fun MusicLoadingPanel() {
             )
             Spacer(Modifier.height(6.dp))
             BasicText(
-                "Artists, albums, radio and rooms are coming from Music Assistant.",
+                "Artists, albums, radio and rooms are loading.",
                 style = TextStyle(color = Color(0xFF8C96A5), fontSize = 13.sp),
             )
         }
@@ -2852,7 +2864,7 @@ private fun MusicErrorPanel(
             .padding(22.dp),
     ) {
         BasicText(
-            "Music Assistant needs attention",
+            "Music needs attention",
             style = TextStyle(color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold),
         )
         Spacer(Modifier.height(7.dp))
