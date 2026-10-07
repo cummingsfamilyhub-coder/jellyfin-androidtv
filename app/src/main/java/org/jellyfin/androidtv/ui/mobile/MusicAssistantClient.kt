@@ -53,6 +53,26 @@ internal data class MaPlayer(
     val canNext: Boolean,
 )
 
+internal data class MaQueueItem(
+    val queueItemId: String,
+    val queueId: String,
+    val index: Int,
+    val name: String,
+    val artist: String?,
+    val imageUrl: String?,
+    val duration: Int?,
+    val mediaType: String,
+)
+
+internal data class MaSearchResults(
+    val artists: List<MaMediaItem> = emptyList(),
+    val albums: List<MaMediaItem> = emptyList(),
+    val tracks: List<MaMediaItem> = emptyList(),
+) {
+    val all: List<MaMediaItem>
+        get() = artists + albums + tracks
+}
+
 internal data class MusicAssistantSnapshot(
     val recentlyPlayed: List<MaMediaItem> = emptyList(),
     val artists: List<MaMediaItem> = emptyList(),
@@ -127,6 +147,54 @@ internal class MusicAssistantClient(
             playlists = playlists,
             radios = radios,
             players = players,
+        )
+    }
+
+    fun searchLibrary(query: String, limit: Int = 12): MaSearchResults {
+        val clean = query.trim()
+        if (clean.isBlank()) return MaSearchResults()
+
+        val result = command(
+            "music/search",
+            JSONObject()
+                .put("search_query", clean)
+                .put("media_types", JSONArray(listOf("artist", "album", "track")))
+                .put("limit", limit)
+                .put("providers", JSONArray(listOf("library")))
+        ) as? JSONObject ?: return MaSearchResults()
+
+        fun items(key: String): List<MaMediaItem> {
+            val array = result.optJSONArray(key) ?: return emptyList()
+            return buildList {
+                for (index in 0 until array.length()) {
+                    array.optJSONObject(index)?.let(::parseMediaItem)?.let(::add)
+                }
+            }
+        }
+
+        return MaSearchResults(
+            artists = items("artists"),
+            albums = items("albums"),
+            tracks = items("tracks"),
+        )
+    }
+
+    fun loadQueue(queueId: String): List<MaQueueItem> =
+        commandArray(
+            "player_queues/items",
+            JSONObject()
+                .put("queue_id", queueId)
+                .put("limit", 500)
+                .put("offset", 0)
+        ).mapNotNull(::parseQueueItem)
+
+    fun playQueueItem(queueId: String, queueItemId: String) {
+        command(
+            "player_queues/play_index",
+            JSONObject()
+                .put("queue_id", queueId)
+                .put("index", queueItemId)
+                .put("seek_position", 0)
         )
     }
 
@@ -356,6 +424,34 @@ internal class MusicAssistantClient(
             subtitle = subtitle,
             imageUrl = mediaImageUrl(json),
             playable = json.optBoolean("is_playable", mediaType != "artist"),
+        )
+    }
+
+    private fun parseQueueItem(json: JSONObject): MaQueueItem? {
+        val queueItemId = json.optString("queue_item_id").trim()
+        val queueId = json.optString("queue_id").trim()
+        if (queueItemId.isBlank() || queueId.isBlank()) return null
+
+        val media = json.optJSONObject("media_item")
+        val artists = media?.let(::artistNames).orEmpty()
+        val displayName = media?.optString("name")?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: json.optString("name").trim().ifBlank { "Unknown track" }
+        val duration = if (json.isNull("duration")) null else json.optInt("duration")
+        val mediaType = media?.optString("media_type")?.ifBlank { null }
+            ?: "track"
+        val image = json.optJSONObject("image")?.let(::imageUrl)
+            ?: media?.let(::mediaImageUrl)
+
+        return MaQueueItem(
+            queueItemId = queueItemId,
+            queueId = queueId,
+            index = json.optInt("index", 0),
+            name = displayName,
+            artist = artists.takeIf { it.isNotBlank() },
+            imageUrl = image,
+            duration = duration,
+            mediaType = mediaType,
         )
     }
 
