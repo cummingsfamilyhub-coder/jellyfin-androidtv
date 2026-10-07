@@ -6303,6 +6303,158 @@ private fun SearchSectionHeader(
 }
 
 @Composable
+private fun SearchMusicLibraryCard(
+    item: MaMediaItem,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = item.playable, onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF111A23))
+                .border(1.dp, Color(0x333D4F73), RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = item.imageUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    if (item.mediaType == "artist") "◎" else "♫",
+                    style = TextStyle(
+                        color = Color(0xFFA98CFF),
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0xDD15293B))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+            ) {
+                BasicText(
+                    "LIBRARY",
+                    style = TextStyle(
+                        color = Color(0xFFBDEBFF),
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                    ),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(7.dp))
+        BasicText(
+            item.name,
+            style = TextStyle(
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 14.sp,
+            ),
+            maxLines = 2,
+        )
+        BasicText(
+            item.subtitle.ifBlank { item.mediaType.replaceFirstChar { it.uppercase() } },
+            style = TextStyle(color = Color(0xFF89929E), fontSize = 10.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+private fun musicRequestBadge(item: VesperMusicRequestResult): String {
+    if (item.inLibrary || item.status.equals("available", ignoreCase = true)) return "AVAILABLE"
+    return when (item.status.lowercase()) {
+        "monitored", "searching", "queued", "requested" -> "REQUESTED"
+        else -> "REQUEST"
+    }
+}
+
+@Composable
+private fun SearchMusicRequestCard(
+    item: VesperMusicRequestResult,
+    onOpen: () -> Unit,
+) {
+    val badge = musicRequestBadge(item)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF111A23)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = item.coverUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    "♫",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 34.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(
+                        if (badge == "AVAILABLE") Color(0xDD173D2A)
+                        else Color(0xDD26305C)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+            ) {
+                BasicText(
+                    badge,
+                    style = TextStyle(
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.7.sp,
+                    ),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(7.dp))
+        BasicText(
+            item.albumName,
+            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 14.sp),
+            maxLines = 2,
+        )
+        BasicText(
+            item.artistName,
+            style = TextStyle(color = Color(0xFF89929E), fontSize = 10.sp),
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun SeerrMediaCard(
     item: SeerrSearchResult,
     onRequest: suspend (SeerrSearchResult) -> String?,
