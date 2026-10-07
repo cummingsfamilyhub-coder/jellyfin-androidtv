@@ -6619,6 +6619,167 @@ private fun RequestFormatButton(
 }
 
 @Composable
+private fun MusicRequestDetailsPopup(
+    item: VesperMusicRequestResult,
+    onDismiss: () -> Unit,
+    onRequest: suspend (VesperMusicRequestResult) -> String?,
+    onRequested: () -> Unit,
+) {
+    var status by remember(item.albumMbid, item.status, item.inLibrary) {
+        mutableStateOf(musicRequestBadge(item))
+    }
+    var requesting by remember(item.albumMbid) { mutableStateOf(false) }
+    var message by remember(item.albumMbid) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val requestEnabled = !requesting && status == "REQUEST"
+
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xF706090D))
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicText(
+                            "MUSIC",
+                            style = TextStyle(
+                                color = Color(0xFFA98CFF),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.5.sp,
+                            ),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(21.dp))
+                                .background(Color(0x22FFFFFF))
+                                .clickable(onClick = onDismiss),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(
+                                "×",
+                                style = TextStyle(
+                                    color = Color.White,
+                                    fontSize = 25.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                }
+
+                item {
+                    Box(
+                        modifier = Modifier
+                            .width(250.dp)
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color(0xFF111A23)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!item.coverUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                modifier = Modifier.fillMaxSize(),
+                                url = item.coverUrl,
+                                scaleType = ImageView.ScaleType.CENTER_CROP,
+                            )
+                        } else {
+                            BasicText(
+                                "♫",
+                                style = TextStyle(
+                                    color = Color(0xFFA98CFF),
+                                    fontSize = 70.sp,
+                                    fontWeight = FontWeight.Bold,
+                                ),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                }
+
+                item {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        BasicText(
+                            item.albumName,
+                            style = TextStyle(
+                                color = Color.White,
+                                fontSize = 25.sp,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        BasicText(
+                            listOfNotNull(
+                                item.artistName,
+                                item.releaseDate?.take(4),
+                                when (status) {
+                                    "AVAILABLE" -> "Available"
+                                    "REQUESTED" -> "Requested"
+                                    else -> "Album"
+                                },
+                            ).joinToString("  •  "),
+                            style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp),
+                        )
+                        Spacer(Modifier.height(22.dp))
+                        RequestFormatButton(
+                            label = when {
+                                requesting -> "Requesting…"
+                                status == "AVAILABLE" -> "Available"
+                                status == "REQUESTED" -> "Requested"
+                                else -> "Request Album"
+                            },
+                            enabled = requestEnabled,
+                        ) {
+                            requesting = true
+                            message = null
+                            scope.launch {
+                                val result = onRequest(item)
+                                requesting = false
+                                if (result != null && !result.contains("failed", ignoreCase = true)) {
+                                    status = if (result.equals("Available", ignoreCase = true)) {
+                                        "AVAILABLE"
+                                    } else {
+                                        "REQUESTED"
+                                    }
+                                    message = result
+                                    onRequested()
+                                } else {
+                                    message = result ?: "Request failed"
+                                }
+                            }
+                        }
+                        if (!message.isNullOrBlank()) {
+                            Spacer(Modifier.height(9.dp))
+                            BasicText(
+                                message.orEmpty(),
+                                style = TextStyle(color = Color(0xFF9BA8B5), fontSize = 11.sp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SeerrMediaCard(
     item: SeerrSearchResult,
     onRequest: suspend (SeerrSearchResult) -> String?,
