@@ -135,6 +135,12 @@ class MobileMainActivity : FragmentActivity() {
     private var seerrApiKey by mutableStateOf("")
     private var musicAssistantBaseUrl by mutableStateOf("")
     private var musicAssistantToken by mutableStateOf("")
+    private var musicRequestsUrl by mutableStateOf("")
+    private var musicRequestsApiKey by mutableStateOf("")
+    private var bookRequestsUrl by mutableStateOf("")
+    private var bookRequestsApiKey by mutableStateOf("")
+    private var audiobookLibraryUrl by mutableStateOf("")
+    private var audiobookLibraryToken by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
     private var showPersistentMiniPlayer by mutableStateOf(true)
     private val hydratedTabs = mutableSetOf<MobileTab>()
@@ -164,6 +170,12 @@ class MobileMainActivity : FragmentActivity() {
         musicAssistantToken = vesperPreferences
             .getString("music_assistant_token", "")
             .orEmpty()
+        musicRequestsUrl = vesperPreferences.getString("music_requests_url", "").orEmpty()
+        musicRequestsApiKey = vesperPreferences.getString("music_requests_api_key", "").orEmpty()
+        bookRequestsUrl = vesperPreferences.getString("book_requests_url", "").orEmpty()
+        bookRequestsApiKey = vesperPreferences.getString("book_requests_api_key", "").orEmpty()
+        audiobookLibraryUrl = vesperPreferences.getString("audiobook_library_url", "").orEmpty()
+        audiobookLibraryToken = vesperPreferences.getString("audiobook_library_token", "").orEmpty()
         showPersistentMiniPlayer = vesperPreferences
             .getBoolean("show_persistent_mini_player", true)
         if (vesperPreferences.contains("seerr_url")) {
@@ -197,9 +209,18 @@ class MobileMainActivity : FragmentActivity() {
                 },
                 api = api,
                 seerrConfigured = seerrApiKey.isNotBlank(),
+                musicRequestsConfigured = musicRequestsUrl.isNotBlank() && musicRequestsApiKey.isNotBlank(),
+                bookRequestsConfigured = bookRequestsUrl.isNotBlank() && bookRequestsApiKey.isNotBlank(),
+                audiobookLibraryConfigured = audiobookLibraryUrl.isNotBlank() && audiobookLibraryToken.isNotBlank(),
                 onLibrarySearch = ::searchLibrary,
                 onSeerrSearch = ::searchSeerr,
                 onSeerrRequest = ::requestSeerr,
+                onMusicLibrarySearch = ::searchMusicLibrary,
+                onMusicRequestSearch = ::searchMusicRequests,
+                onMusicRequest = ::requestMusicAlbum,
+                onBookLibrarySearch = ::searchBookLibrary,
+                onBookRequestSearch = ::searchBookRequests,
+                onBookRequest = ::requestBook,
                 onSelect = { selected = it },
                 onBack = { selected = null },
                 onRetry = ::loadHome,
@@ -757,6 +778,84 @@ class MobileMainActivity : FragmentActivity() {
                 connection.disconnect()
             }
         }
+
+    private suspend fun searchMusicLibrary(query: String): MaSearchResults =
+        withContext(Dispatchers.IO) {
+            if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) {
+                return@withContext MaSearchResults()
+            }
+            MusicAssistantClient(
+                baseUrl = musicAssistantBaseUrl,
+                token = musicAssistantToken,
+            ).searchLibrary(query)
+        }
+
+    private suspend fun searchMusicRequests(query: String): List<VesperMusicRequestResult> =
+        withContext(Dispatchers.IO) {
+            if (musicRequestsUrl.isBlank() || musicRequestsApiKey.isBlank()) {
+                return@withContext emptyList()
+            }
+            AurralRequestClient(
+                baseUrl = musicRequestsUrl,
+                apiKey = musicRequestsApiKey,
+            ).searchAlbums(query)
+        }
+
+    private suspend fun requestMusicAlbum(item: VesperMusicRequestResult): String? =
+        withContext(Dispatchers.IO) {
+            if (musicRequestsUrl.isBlank() || musicRequestsApiKey.isBlank()) {
+                return@withContext "Set up Music Requests in Vesper settings first."
+            }
+            runCatching {
+                AurralRequestClient(
+                    baseUrl = musicRequestsUrl,
+                    apiKey = musicRequestsApiKey,
+                ).requestAlbum(item)
+            }.fold(
+                onSuccess = { it },
+                onFailure = { friendlyServiceError("Music requests", it) },
+            )
+        }
+
+    private suspend fun searchBookLibrary(query: String): List<VesperBookLibraryResult> =
+        withContext(Dispatchers.IO) {
+            if (audiobookLibraryUrl.isBlank() || audiobookLibraryToken.isBlank()) {
+                return@withContext emptyList()
+            }
+            AudiobookshelfLibraryClient(
+                baseUrl = audiobookLibraryUrl,
+                token = audiobookLibraryToken,
+            ).search(query)
+        }
+
+    private suspend fun searchBookRequests(query: String): List<VesperBookRequestResult> =
+        withContext(Dispatchers.IO) {
+            if (bookRequestsUrl.isBlank() || bookRequestsApiKey.isBlank()) {
+                return@withContext emptyList()
+            }
+            LazyLibrarianRequestClient(
+                baseUrl = bookRequestsUrl,
+                apiKey = bookRequestsApiKey,
+            ).searchBooks(query)
+        }
+
+    private suspend fun requestBook(
+        item: VesperBookRequestResult,
+        audiobook: Boolean,
+    ): String? = withContext(Dispatchers.IO) {
+        if (bookRequestsUrl.isBlank() || bookRequestsApiKey.isBlank()) {
+            return@withContext "Set up Book Requests in Vesper settings first."
+        }
+        runCatching {
+            LazyLibrarianRequestClient(
+                baseUrl = bookRequestsUrl,
+                apiKey = bookRequestsApiKey,
+            ).requestBook(item, audiobook)
+        }.fold(
+            onSuccess = { it },
+            onFailure = { friendlyServiceError("Book requests", it) },
+        )
+    }
 
     private fun loadMusic() {
         if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) {
