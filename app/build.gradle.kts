@@ -112,7 +112,7 @@ android {
 	}
 }
 
-base.archivesName.set("vesper-v${project.getVersionName()}")
+base.archivesName.set("vesper-mobile-v${project.getVersionName()}")
 
 tasks.register("versionTxt") {
 	val path = layout.buildDirectory.asFile.get().resolve("version.txt")

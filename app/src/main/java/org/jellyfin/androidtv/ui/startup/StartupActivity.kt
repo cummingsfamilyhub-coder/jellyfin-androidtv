@@ -32,8 +32,8 @@ import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.databinding.ActivityStartupBinding
 import org.jellyfin.androidtv.ui.background.AppBackground
-import org.jellyfin.androidtv.ui.browsing.MainActivity
 import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
+import org.jellyfin.androidtv.ui.mobile.MobileMainActivity
 import org.jellyfin.androidtv.ui.mobile.MobileStartupActivity
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
@@ -178,7 +178,7 @@ class StartupActivity : FragmentActivity() {
 
 		navigationRepository.reset(destination, true)
 
-		val intent = Intent(this, MainActivity::class.java)
+		val intent = Intent(this, MobileMainActivity::class.java)
 		// Clear navigation history
 		intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_TASK_ON_HOME)
 		Timber.i("Opening next activity $intent")

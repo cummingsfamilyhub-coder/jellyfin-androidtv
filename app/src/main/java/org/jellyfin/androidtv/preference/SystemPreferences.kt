@@ -66,6 +66,6 @@ class SystemPreferences(context: Context) : SharedPreferenceStore(
 		/**
 		 * Whether to disable the "UI mode" warning that shows when using the app on non TV devices.
 		 */
-		val disableUiModeWarning = booleanPreference("disable_ui_mode_warning", false)
+		val disableUiModeWarning = booleanPreference("disable_ui_mode_warning", true)
 	}
 }

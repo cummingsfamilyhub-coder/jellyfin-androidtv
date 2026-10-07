@@ -45,13 +45,13 @@
         android:banner="@mipmap/app_banner"
         android:dataExtractionRules="@xml/backup_rules"
         android:fullBackupContent="@xml/backup_content"
-        android:icon="@mipmap/app_icon"
+        android:icon="@drawable/vesper_icon"
         android:label="@string/app_name"
         android:largeHeap="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.Jellyfin"
         android:usesCleartextTraffic="true"
-        android:networkSecurityConfig="@xml/network_security_config">
+        android:networkSecurityConfig="@xml/vesper_mobile_network_security_config">
 
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
@@ -118,12 +118,9 @@
             android:noHistory="true"
             android:windowSoftInputMode="adjustNothing">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
                 <action android:name="android.intent.action.SEARCH" />
                 <action android:name="android.intent.action.VIEW" />
 
-                <category android:name="android.intent.category.LAUNCHER" />
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
 
             <meta-data
@@ -137,11 +134,19 @@
         <!-- Touch-first Vesper mobile application -->
         <activity
             android:name=".ui.mobile.MobileStartupActivity"
-            android:exported="false"
-            android:windowSoftInputMode="adjustResize" />
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".ui.mobile.MobileMainActivity"
             android:exported="false"
+            android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden|navigation|uiMode"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".ui.mobile.MobileSettingsActivity"
@@ -150,6 +155,8 @@
         <activity
             android:name=".ui.mobile.MobilePlayerActivity"
             android:exported="false"
+            android:configChanges="density|screenSize|smallestScreenSize|screenLayout|orientation|keyboard|keyboardHidden|navigation|uiMode"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustNothing" />
 
         <!-- Main application -->
