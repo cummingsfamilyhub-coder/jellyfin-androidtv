@@ -1677,6 +1677,8 @@ private fun VesperMobile(
                     onBookLibrarySearch = onBookLibrarySearch,
                     onBookRequestSearch = onBookRequestSearch,
                     onBookRequest = onBookRequest,
+                    musicPlayers = musicState.snapshot.players,
+                    onPlayMusic = onPlayMusic,
                     onSelect = onSelect,
                     onToggleFavorite = onToggleFavorite,
                     expanded = expanded,
