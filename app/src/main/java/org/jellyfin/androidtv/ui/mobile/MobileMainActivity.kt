@@ -4662,7 +4662,7 @@ private fun BookDetailsPopup(
     onDismiss: () -> Unit,
     onLoadDetails: suspend (String) -> VesperBookItem,
 ) {
-    var item by remember(initialItem.itemId) { mutableStateOf(initialItem) }
+    var details by remember(initialItem.itemId) { mutableStateOf(initialItem) }
     var loading by remember(initialItem.itemId) { mutableStateOf(true) }
     var error by remember(initialItem.itemId) { mutableStateOf<String?>(null) }
 
@@ -4670,7 +4670,7 @@ private fun BookDetailsPopup(
         loading = true
         error = null
         runCatching { onLoadDetails(initialItem.itemId) }
-            .onSuccess { item = it }
+            .onSuccess { details = it }
             .onFailure { error = it.message ?: "Couldn't load book details." }
         loading = false
     }
@@ -4727,10 +4727,10 @@ private fun BookDetailsPopup(
                             .background(Color(0xFF111722)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (!item.coverUrl.isNullOrBlank()) {
+                        if (!details.coverUrl.isNullOrBlank()) {
                             AsyncImage(
                                 modifier = Modifier.fillMaxSize(),
-                                url = item.coverUrl,
+                                url = details.coverUrl,
                                 scaleType = ImageView.ScaleType.CENTER_CROP,
                             )
                         } else {
@@ -4746,36 +4746,36 @@ private fun BookDetailsPopup(
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         BasicText(
-                            item.title,
+                            details.title,
                             style = TextStyle(color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold, lineHeight = 31.sp),
                         )
                         Spacer(Modifier.height(5.dp))
                         BasicText(
-                            item.author,
+                            details.author,
                             style = TextStyle(color = Color(0xFFB0B7C1), fontSize = 14.sp),
                         )
 
                         Spacer(Modifier.height(13.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                            if (item.hasAudio) BookFormatChip("Audiobook")
-                            if (item.hasEbook) BookFormatChip("eBook")
-                            item.publishedYear?.let { BookFormatChip(it) }
+                            if (details.hasAudio) BookFormatChip("Audiobook")
+                            if (details.hasEbook) BookFormatChip("eBook")
+                            details.publishedYear?.let { BookFormatChip(it) }
                         }
 
-                        item.series?.let { series ->
+                        details.series?.let { series ->
                             Spacer(Modifier.height(16.dp))
                             BookDetailLine("Series", series)
                         }
-                        item.narrator?.let { narrator ->
+                        details.narrator?.let { narrator ->
                             Spacer(Modifier.height(9.dp))
                             BookDetailLine("Narrated by", narrator)
                         }
-                        if (item.durationSeconds > 0) {
+                        if (details.durationSeconds > 0) {
                             Spacer(Modifier.height(9.dp))
-                            BookDetailLine("Length", formatBookDuration(item.durationSeconds))
+                            BookDetailLine("Length", formatBookDuration(details.durationSeconds))
                         }
 
-                        item.progress?.let { progress ->
+                        details.progress?.let { progress ->
                             Spacer(Modifier.height(18.dp))
                             val percent = (progress * 100).toInt().coerceIn(0, 100)
                             BasicText(
@@ -4799,10 +4799,10 @@ private fun BookDetailsPopup(
                             }
                         }
 
-                        if (!item.description.isNullOrBlank()) {
+                        if (!details.description.isNullOrBlank()) {
                             Spacer(Modifier.height(20.dp))
                             BasicText(
-                                item.description.orEmpty(),
+                                details.description.orEmpty(),
                                 style = TextStyle(color = Color(0xFFCBD1D9), fontSize = 14.sp, lineHeight = 21.sp),
                             )
                         }
