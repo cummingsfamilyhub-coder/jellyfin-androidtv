@@ -4020,11 +4020,17 @@ private fun MusicGroupManager(
 
 @Composable
 private fun BooksHub(
+    state: BooksUiState,
+    configured: Boolean,
     userName: String,
     userAvatarUrl: String?,
+    onRetry: () -> Unit,
+    onLoadDetails: suspend (String) -> VesperBookItem,
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    var selectedBook by remember { mutableStateOf<VesperBookItem?>(null) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
@@ -4040,50 +4046,814 @@ private fun BooksHub(
             )
         }
 
-        item {
-            PlaceholderHero(
-                eyebrow = "BOOKS",
-                title = "Read or listen",
-                subtitle = "Ebooks and audiobooks, with progress following you between devices.",
-                action = "Book library later",
-                icon = "▤",
-            )
+        when {
+            !configured -> {
+                item {
+                    BooksConnectPanel(onSettings = onSettings)
+                }
+            }
+
+            state.loading && !state.loaded -> {
+                item {
+                    BooksStatusPanel(
+                        title = "Loading your books…",
+                        message = "Building your shelves, audiobooks, eBooks, authors and series.",
+                    )
+                }
+            }
+
+            state.error != null && !state.loaded -> {
+                item {
+                    BooksStatusPanel(
+                        title = "Books needs attention",
+                        message = state.error,
+                        actionLabel = "Try again",
+                        onAction = onRetry,
+                        secondaryLabel = "Settings",
+                        onSecondary = onSettings,
+                    )
+                }
+            }
+
+            else -> {
+                val snapshot = state.snapshot
+                val hero = snapshot.continueListening.firstOrNull()
+                    ?: snapshot.continueReading.firstOrNull()
+                    ?: snapshot.recentlyAdded.firstOrNull()
+                    ?: snapshot.discover.firstOrNull()
+                    ?: snapshot.audiobooks.firstOrNull()
+                    ?: snapshot.ebooks.firstOrNull()
+
+                if (hero != null) {
+                    item {
+                        BooksHero(
+                            item = hero,
+                            onClick = { selectedBook = hero },
+                        )
+                    }
+                }
+
+                item {
+                    BooksModeSummary(
+                        audiobookCount = snapshot.audiobooks.size,
+                        ebookCount = snapshot.ebooks.size,
+                    )
+                }
+
+                if (snapshot.continueListening.isNotEmpty()) {
+                    item {
+                        BookCoverRow(
+                            title = "Continue Listening",
+                            items = snapshot.continueListening,
+                            onClick = { selectedBook = it },
+                            showContinue = true,
+                        )
+                    }
+                }
+
+                if (snapshot.continueReading.isNotEmpty()) {
+                    item {
+                        BookCoverRow(
+                            title = "Continue Reading",
+                            items = snapshot.continueReading,
+                            onClick = { selectedBook = it },
+                            showContinue = true,
+                        )
+                    }
+                }
+
+                if (snapshot.recentlyAdded.isNotEmpty()) {
+                    item {
+                        BookCoverRow(
+                            title = "Recently Added",
+                            items = snapshot.recentlyAdded,
+                            onClick = { selectedBook = it },
+                        )
+                    }
+                }
+
+                if (snapshot.audiobooks.isNotEmpty()) {
+                    item {
+                        BookCoverRow(
+                            title = "Audiobooks",
+                            items = snapshot.audiobooks,
+                            onClick = { selectedBook = it },
+                        )
+                    }
+                }
+
+                if (snapshot.ebooks.isNotEmpty()) {
+                    item {
+                        BookCoverRow(
+                            title = "eBooks",
+                            items = snapshot.ebooks,
+                            onClick = { selectedBook = it },
+                        )
+                    }
+                }
+
+                if (snapshot.discover.isNotEmpty()) {
+                    item {
+                        BookCoverRow(
+                            title = "Discover",
+                            items = snapshot.discover,
+                            onClick = { selectedBook = it },
+                        )
+                    }
+                }
+
+                if (snapshot.authors.isNotEmpty()) {
+                    item {
+                        BookPeopleRow(
+                            title = "Authors",
+                            people = snapshot.authors,
+                        )
+                    }
+                }
+
+                if (snapshot.series.isNotEmpty()) {
+                    item {
+                        BookSeriesRow(
+                            title = "Series",
+                            series = snapshot.series,
+                        )
+                    }
+                }
+
+                if (
+                    hero == null &&
+                    snapshot.authors.isEmpty() &&
+                    snapshot.series.isEmpty()
+                ) {
+                    item {
+                        BooksStatusPanel(
+                            title = "Your book library is empty",
+                            message = "When books or audiobooks are added, they’ll appear here automatically.",
+                        )
+                    }
+                }
+            }
         }
+    }
 
-        item { BookModeStrip() }
+    selectedBook?.let { item ->
+        BookDetailsPopup(
+            initialItem = item,
+            onDismiss = { selectedBook = null },
+            onLoadDetails = onLoadDetails,
+        )
+    }
+}
 
-        item {
-            PlaceholderTileRow(
-                title = "Continue Reading",
-                items = listOf(
-                    "Continue reading" to "Resume from your last page",
-                    "Highlights" to "Bookmarks and notes later",
-                    "MyV" to "Saved books",
+@Composable
+private fun BooksConnectPanel(
+    onSettings: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF20163A),
+                        Color(0xFF11192C),
+                        Color(0xFF07121D),
+                    )
+                )
+            )
+            .border(1.dp, Color(0x554D42A6), RoundedCornerShape(24.dp))
+            .padding(22.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth(.72f)) {
+            BasicText(
+                "BOOKS",
+                style = TextStyle(
+                    color = Color(0xFFA98CFF),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
                 ),
             )
-        }
-
-        item {
-            PlaceholderTileRow(
-                title = "Continue Listening",
-                items = listOf(
-                    "Audiobooks" to "Resume listening",
-                    "New audio" to "Recently added",
-                    "Downloads" to "Offline listening later",
+            Spacer(Modifier.height(8.dp))
+            BasicText(
+                "YOUR LIBRARY, ONE SHELF",
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = 27.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 30.sp,
                 ),
             )
+            Spacer(Modifier.height(8.dp))
+            BasicText(
+                "Connect your book library for audiobooks, eBooks, authors, series and synced progress.",
+                style = TextStyle(color = Color(0xFFA4ADBA), fontSize = 13.sp, lineHeight = 18.sp),
+            )
+            Spacer(Modifier.height(16.dp))
+            VesperButton("Book Settings", onSettings)
         }
 
-        item {
-            PlaceholderTileRow(
-                title = "New Books",
-                items = listOf(
-                    "New books" to "Recently added",
-                    "Authors" to "Browse by author",
-                    "Collections" to "Series and shelves",
-                ),
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(104.dp)
+                .clip(RoundedCornerShape(34.dp))
+                .background(Color(0x252F6BFF)),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                "▤",
+                style = TextStyle(color = Color(0xFFA98CFF), fontSize = 50.sp, fontWeight = FontWeight.Bold),
             )
         }
+    }
+}
+
+@Composable
+private fun BooksStatusPanel(
+    title: String,
+    message: String,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    secondaryLabel: String? = null,
+    onSecondary: (() -> Unit)? = null,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF121722))
+            .border(1.dp, Color(0x334D4A75), RoundedCornerShape(22.dp))
+            .padding(20.dp),
+    ) {
+        BasicText(
+            title,
+            style = TextStyle(color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold),
+        )
+        Spacer(Modifier.height(6.dp))
+        BasicText(
+            message,
+            style = TextStyle(color = Color(0xFF929BA8), fontSize = 13.sp, lineHeight = 18.sp),
+        )
+        if (actionLabel != null && onAction != null) {
+            Spacer(Modifier.height(15.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                VesperButton(actionLabel, onAction)
+                if (secondaryLabel != null && onSecondary != null) {
+                    DarkButton(secondaryLabel, onSecondary)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BooksHero(
+    item: VesperBookItem,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF251B45),
+                        Color(0xFF11192B),
+                        Color(0xFF071018),
+                    )
+                )
+            )
+            .border(1.dp, Color(0x554D42A6), RoundedCornerShape(24.dp))
+            .clickable(onClick = onClick)
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(112.dp)
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color(0xFF101722)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(),
+                    url = item.coverUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                )
+            } else {
+                BasicText(
+                    "▤",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 42.sp, fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+
+        Spacer(Modifier.width(18.dp))
+
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                when {
+                    item.progress != null -> "CONTINUE"
+                    item.hasAudio && item.hasEbook -> "LISTEN OR READ"
+                    item.hasAudio -> "AUDIOBOOK"
+                    else -> "EBOOK"
+                },
+                style = TextStyle(
+                    color = Color(0xFFA98CFF),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.7.sp,
+                ),
+            )
+            Spacer(Modifier.height(7.dp))
+            BasicText(
+                item.title,
+                style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold, lineHeight = 28.sp),
+                maxLines = 3,
+            )
+            Spacer(Modifier.height(6.dp))
+            BasicText(
+                item.author,
+                style = TextStyle(color = Color(0xFFAAB1BC), fontSize = 13.sp),
+                maxLines = 2,
+            )
+
+            item.series?.let { series ->
+                Spacer(Modifier.height(5.dp))
+                BasicText(
+                    series,
+                    style = TextStyle(color = Color(0xFF7F88A0), fontSize = 11.sp),
+                    maxLines = 1,
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                BookFormatChip(item.mediaKind)
+                item.progress?.let { progress ->
+                    BookFormatChip("${(progress * 100).toInt().coerceIn(0, 100)}%")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BooksModeSummary(
+    audiobookCount: Int,
+    ebookCount: Int,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xD5161824))
+            .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
+            .padding(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        listOf(
+            Triple("♫", "Audiobooks", audiobookCount),
+            Triple("▤", "eBooks", ebookCount),
+        ).forEach { (icon, label, count) ->
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x1E6B55FF))
+                    .padding(horizontal = 13.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicText(
+                    icon,
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                )
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    BasicText(
+                        label,
+                        style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                    )
+                    BasicText(
+                        count.toString(),
+                        style = TextStyle(color = Color(0xFF858E9B), fontSize = 9.sp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookCoverRow(
+    title: String,
+    items: List<VesperBookItem>,
+    onClick: (VesperBookItem) -> Unit,
+    showContinue: Boolean = false,
+) {
+    Column(Modifier.padding(top = 10.dp)) {
+        BasicText(
+            title,
+            style = TextStyle(color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+        )
+
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
+            items(items, key = { "${title}-${it.itemId}" }) { item ->
+                Column(
+                    modifier = Modifier
+                        .width(136.dp)
+                        .clickable { onClick(item) },
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF111722))
+                            .border(1.dp, Color(0x334D4A75), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!item.coverUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                modifier = Modifier.fillMaxSize(),
+                                url = item.coverUrl,
+                                scaleType = ImageView.ScaleType.CENTER_CROP,
+                            )
+                        } else {
+                            BasicText(
+                                "▤",
+                                style = TextStyle(color = Color(0xFFA98CFF), fontSize = 34.sp, fontWeight = FontWeight.Bold),
+                            )
+                        }
+
+                        if (showContinue) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(8.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color(0xE60B0E14))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) {
+                                BasicText(
+                                    "CONTINUE",
+                                    style = TextStyle(color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    BasicText(
+                        item.title,
+                        style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 2,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    BasicText(
+                        item.author,
+                        style = TextStyle(color = Color(0xFF848D99), fontSize = 9.sp),
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookPeopleRow(
+    title: String,
+    people: List<VesperBookPerson>,
+) {
+    Column(Modifier.padding(top = 10.dp)) {
+        BasicText(
+            title,
+            style = TextStyle(color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+        )
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(people, key = { it.id }) { person ->
+                Row(
+                    modifier = Modifier
+                        .width(176.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xD5161824))
+                        .border(1.dp, Color(0x334D4A75), RoundedCornerShape(18.dp))
+                        .padding(13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(Color(0x332F6BFF)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(
+                            person.name.take(1).uppercase(),
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        BasicText(
+                            person.name,
+                            style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                            maxLines = 2,
+                        )
+                        BasicText(
+                            if (person.count > 0) "${person.count} books" else "Author",
+                            style = TextStyle(color = Color(0xFF808996), fontSize = 9.sp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookSeriesRow(
+    title: String,
+    series: List<VesperBookSeries>,
+) {
+    Column(Modifier.padding(top = 10.dp)) {
+        BasicText(
+            title,
+            style = TextStyle(color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+        )
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(series, key = { it.id }) { item ->
+                Column(
+                    modifier = Modifier
+                        .width(176.dp)
+                        .height(106.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    Color(0xD5251D45),
+                                    Color(0xD5101721),
+                                )
+                            )
+                        )
+                        .border(1.dp, Color(0x3D6B55FF), RoundedCornerShape(18.dp))
+                        .padding(14.dp),
+                ) {
+                    BasicText(
+                        "SERIES",
+                        style = TextStyle(color = Color(0xFFA98CFF), fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp),
+                    )
+                    Spacer(Modifier.height(7.dp))
+                    BasicText(
+                        item.name,
+                        style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 2,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    BasicText(
+                        if (item.count > 0) "${item.count} books" else "Book series",
+                        style = TextStyle(color = Color(0xFF838C99), fontSize = 9.sp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookFormatChip(label: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0x332F6BFF))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(color = Color(0xFFD8D0FF), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+        )
+    }
+}
+
+@Composable
+private fun BookDetailsPopup(
+    initialItem: VesperBookItem,
+    onDismiss: () -> Unit,
+    onLoadDetails: suspend (String) -> VesperBookItem,
+) {
+    var item by remember(initialItem.itemId) { mutableStateOf(initialItem) }
+    var loading by remember(initialItem.itemId) { mutableStateOf(true) }
+    var error by remember(initialItem.itemId) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialItem.itemId) {
+        loading = true
+        error = null
+        runCatching { onLoadDetails(initialItem.itemId) }
+            .onSuccess { item = it }
+            .onFailure { error = it.message ?: "Couldn't load book details." }
+        loading = false
+    }
+
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xF705080C))
+                .padding(horizontal = 22.dp, vertical = 18.dp),
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicText(
+                            "BOOKS",
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.7.sp),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(21.dp))
+                                .background(Color(0x22FFFFFF))
+                                .clickable(onClick = onDismiss),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(
+                                "×",
+                                style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.SemiBold),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                }
+
+                item {
+                    Box(
+                        modifier = Modifier
+                            .width(190.dp)
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(Color(0xFF111722)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!item.coverUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                modifier = Modifier.fillMaxSize(),
+                                url = item.coverUrl,
+                                scaleType = ImageView.ScaleType.CENTER_CROP,
+                            )
+                        } else {
+                            BasicText(
+                                "▤",
+                                style = TextStyle(color = Color(0xFFA98CFF), fontSize = 48.sp, fontWeight = FontWeight.Bold),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                }
+
+                item {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        BasicText(
+                            item.title,
+                            style = TextStyle(color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold, lineHeight = 31.sp),
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        BasicText(
+                            item.author,
+                            style = TextStyle(color = Color(0xFFB0B7C1), fontSize = 14.sp),
+                        )
+
+                        Spacer(Modifier.height(13.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            if (item.hasAudio) BookFormatChip("Audiobook")
+                            if (item.hasEbook) BookFormatChip("eBook")
+                            item.publishedYear?.let { BookFormatChip(it) }
+                        }
+
+                        item.series?.let { series ->
+                            Spacer(Modifier.height(16.dp))
+                            BookDetailLine("Series", series)
+                        }
+                        item.narrator?.let { narrator ->
+                            Spacer(Modifier.height(9.dp))
+                            BookDetailLine("Narrated by", narrator)
+                        }
+                        if (item.durationSeconds > 0) {
+                            Spacer(Modifier.height(9.dp))
+                            BookDetailLine("Length", formatBookDuration(item.durationSeconds))
+                        }
+
+                        item.progress?.let { progress ->
+                            Spacer(Modifier.height(18.dp))
+                            val percent = (progress * 100).toInt().coerceIn(0, 100)
+                            BasicText(
+                                "Progress  ·  $percent%",
+                                style = TextStyle(color = Color(0xFFD8D0FF), fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                            )
+                            Spacer(Modifier.height(7.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(Color(0xFF262B35)),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(percent / 100f)
+                                        .fillMaxHeight()
+                                        .background(Color(0xFFA98CFF)),
+                                )
+                            }
+                        }
+
+                        if (!item.description.isNullOrBlank()) {
+                            Spacer(Modifier.height(20.dp))
+                            BasicText(
+                                item.description.orEmpty(),
+                                style = TextStyle(color = Color(0xFFCBD1D9), fontSize = 14.sp, lineHeight = 21.sp),
+                            )
+                        }
+
+                        if (loading) {
+                            Spacer(Modifier.height(16.dp))
+                            BasicText(
+                                "Loading full details…",
+                                style = TextStyle(color = Color(0xFF7F8895), fontSize = 10.sp),
+                            )
+                        }
+                        if (!error.isNullOrBlank()) {
+                            Spacer(Modifier.height(16.dp))
+                            BasicText(
+                                error.orEmpty(),
+                                style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 11.sp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookDetailLine(
+    label: String,
+    value: String,
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        BasicText(
+            label,
+            style = TextStyle(color = Color(0xFF7F8895), fontSize = 11.sp),
+            modifier = Modifier.width(92.dp),
+        )
+        BasicText(
+            value,
+            style = TextStyle(color = Color(0xFFE0E4EA), fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+private fun formatBookDuration(seconds: Int): String {
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    return when {
+        hours > 0 -> "${hours}h ${minutes}m"
+        minutes > 0 -> "${minutes}m"
+        else -> "< 1m"
     }
 }
 
