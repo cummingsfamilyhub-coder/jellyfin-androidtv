@@ -438,7 +438,8 @@ internal class MusicAssistantClient(
             ?.takeIf { it.isNotBlank() }
             ?: json.optString("name").trim().ifBlank { "Unknown track" }
         val duration = if (json.isNull("duration")) null else json.optInt("duration")
-        val mediaType = media?.optString("media_type")?.ifBlank { null }
+        val mediaType = media?.optString("media_type")
+            ?.takeIf { it.isNotBlank() }
             ?: "track"
         val image = json.optJSONObject("image")?.let(::imageUrl)
             ?: media?.let(::mediaImageUrl)
