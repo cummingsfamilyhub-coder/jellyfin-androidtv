@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.VesperServiceConfig
 import androidx.compose.ui.res.painterResource
@@ -209,6 +210,7 @@ class MobileMainActivity : FragmentActivity() {
                 onRetryMusic = ::loadMusic,
                 onPlayMusic = ::playMusic,
                 onControlMusic = ::controlMusic,
+                onSeekMusic = ::seekMusic,
                 onUpdateMusicGroup = ::updateMusicGroup,
                 onSettings = ::openSettings,
             )
@@ -623,10 +625,10 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun seerrHttpError(status: Int): String = when (status) {
-        401, 403 -> "Seerr authentication failed. Check the API key in Settings."
-        408 -> "Seerr timed out. Try again."
-        in 500..599 -> "Seerr is unavailable right now. Try again."
-        else -> "Seerr request failed. Try again."
+        401, 403 -> "Media requests authentication failed. Check Settings."
+        408 -> "Media requests timed out. Try again."
+        in 500..599 -> "Media requests are unavailable right now. Try again."
+        else -> "Media request failed. Try again."
     }
 
     private fun encodeSeerrQueryValue(value: String): String =
@@ -702,10 +704,10 @@ class MobileMainActivity : FragmentActivity() {
                     }
                 }
             } catch (error: Exception) {
-                if (error is IllegalStateException && error.message?.startsWith("Seerr ") == true) {
+                if (error is IllegalStateException && error.message?.startsWith("Media ") == true) {
                     throw error
                 }
-                throw IllegalStateException(friendlyServiceError("Seerr", error), error)
+                throw IllegalStateException(friendlyServiceError("Media requests", error), error)
             } finally {
                 connection.disconnect()
             }
@@ -716,7 +718,7 @@ class MobileMainActivity : FragmentActivity() {
             val baseUrl = VesperServiceConfig.SEERR_BASE_URL
             val apiKey = seerrApiKey.trim()
             if (apiKey.isBlank()) {
-                return@withContext "Add the Seerr API key in Vesper settings first."
+                return@withContext "Set up Media Requests in Vesper settings first."
             }
 
             val connection = (URL("${baseUrl}/api/v1/request").openConnection() as HttpURLConnection).apply {
@@ -748,7 +750,7 @@ class MobileMainActivity : FragmentActivity() {
                     else -> seerrHttpError(connection.responseCode)
                 }
             } catch (error: Exception) {
-                friendlyServiceError("Seerr", error)
+                friendlyServiceError("Media requests", error)
             } finally {
                 connection.disconnect()
             }
@@ -908,6 +910,7 @@ class MobileMainActivity : FragmentActivity() {
                 queueCurrentIndex = player.queueCurrentIndex ?: prior?.queueCurrentIndex,
                 queueResumePosition = maxOf(player.queueResumePosition, prior?.queueResumePosition ?: 0),
                 queueElapsedTime = maxOf(player.queueElapsedTime, prior?.queueElapsedTime ?: 0),
+                queueDuration = maxOf(player.queueDuration, prior?.queueDuration ?: 0),
                 canPrevious = player.canPrevious || (prior?.canPrevious == true),
                 canNext = player.canNext || (prior?.canNext == true),
             )
@@ -974,6 +977,56 @@ class MobileMainActivity : FragmentActivity() {
                 Toast.makeText(
                     this@MobileMainActivity,
                     error.message ?: "Couldn't control playback.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private fun seekMusic(player: MaPlayer, positionSeconds: Int) {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+        if (player.queueDuration <= 0) return
+
+        val target = positionSeconds.coerceIn(0, player.queueDuration)
+        musicState = musicState.copy(
+            snapshot = musicState.snapshot.copy(
+                players = musicState.snapshot.players.map { item ->
+                    if (item.queueId == player.queueId) {
+                        item.copy(
+                            queueElapsedTime = target,
+                            queueResumePosition = target,
+                        )
+                    } else {
+                        item
+                    }
+                }
+            )
+        )
+
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val client = MusicAssistantClient(
+                        baseUrl = musicAssistantBaseUrl,
+                        token = musicAssistantToken,
+                    )
+                    val wasPaused = player.playbackState == "paused"
+                    if (wasPaused && !player.queueActive) {
+                        client.resume(player.queueId)
+                    }
+                    client.seek(player.queueId, target)
+                    if (wasPaused) {
+                        client.pause(player.queueId)
+                    }
+                }
+            }.onSuccess {
+                delay(350)
+                refreshMusicPlayers()
+            }.onFailure { error ->
+                refreshMusicPlayers()
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    error.message ?: "Couldn't seek playback.",
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -1330,6 +1383,7 @@ private fun VesperMobile(
     onRetryMusic: () -> Unit,
     onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControlMusic: (MaPlayer, MusicPlayerAction) -> Unit,
+    onSeekMusic: (MaPlayer, Int) -> Unit,
     onUpdateMusicGroup: (MaPlayer, Set<String>) -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -1474,6 +1528,18 @@ private fun VesperMobile(
                 )
             }
 
+            if (tab in primaryMobileTabs) {
+                PersistentProfileButton(
+                    userName = userName,
+                    userAvatarUrl = userAvatarUrl,
+                    onSwitchProfile = onSwitchProfile,
+                    onSettings = onSettings,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 14.dp, end = 18.dp),
+                )
+            }
+
             if (showPersistentMiniPlayer && musicSessions.isNotEmpty()) {
                 VesperMiniPlayer(
                     players = musicSessions,
@@ -1502,6 +1568,9 @@ private fun VesperMobile(
                     onDismiss = { nowPlayingQueueId = null },
                     onControl = { player, action ->
                         onControlMusic(player, action)
+                    },
+                    onSeek = { player, position ->
+                        onSeekMusic(player, position)
                     },
                     onRooms = { player ->
                         nowPlayingRoomsPlayerId = player.playerId
@@ -1681,6 +1750,7 @@ private fun VesperNowPlaying(
     initialQueueId: String?,
     onDismiss: () -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
+    onSeek: (MaPlayer, Int) -> Unit,
     onRooms: (MaPlayer) -> Unit,
 ) {
     if (players.isEmpty()) return
@@ -1863,6 +1933,17 @@ private fun VesperNowPlaying(
                     )
                 }
 
+                if (
+                    player.queueDuration > 0 &&
+                    player.currentMediaType !in setOf("radio", "audio_source")
+                ) {
+                    Spacer(Modifier.height(smallGap))
+                    NowPlayingProgress(
+                        player = player,
+                        onSeek = { position -> onSeek(player, position) },
+                    )
+                }
+
                 Spacer(Modifier.height(largeGap))
 
                 val queueSummary = when {
@@ -1991,6 +2072,96 @@ private fun VesperNowPlaying(
                     }
                 }
             }
+        }
+    }
+}
+
+private fun formatPlaybackTime(totalSeconds: Int): String {
+    val safe = totalSeconds.coerceAtLeast(0)
+    val hours = safe / 3600
+    val minutes = (safe % 3600) / 60
+    val seconds = safe % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
+
+@Composable
+private fun NowPlayingProgress(
+    player: MaPlayer,
+    onSeek: (Int) -> Unit,
+) {
+    val duration = player.queueDuration.coerceAtLeast(1)
+    var position by remember(player.queueId) {
+        mutableStateOf(
+            maxOf(player.queueElapsedTime, player.queueResumePosition)
+                .coerceIn(0, duration)
+        )
+    }
+
+    LaunchedEffect(
+        player.queueId,
+        player.queueElapsedTime,
+        player.queueResumePosition,
+        player.playbackState,
+    ) {
+        position = maxOf(player.queueElapsedTime, player.queueResumePosition)
+            .coerceIn(0, duration)
+    }
+
+    LaunchedEffect(player.queueId, player.playbackState, duration) {
+        while (player.playbackState == "playing" && position < duration) {
+            delay(1000)
+            position = (position + 1).coerceAtMost(duration)
+        }
+    }
+
+    val progress = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+    val remaining = (duration - position).coerceAtLeast(0)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(24.dp)
+                .pointerInput(player.queueId, duration) {
+                    detectTapGestures { offset ->
+                        val fraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        val target = (duration * fraction).toInt().coerceIn(0, duration)
+                        position = target
+                        onSeek(target)
+                    }
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xFF252A35)),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xFFA98CFF)),
+            )
+        }
+
+        Row(modifier = Modifier.fillMaxWidth()) {
+            BasicText(
+                formatPlaybackTime(position),
+                style = TextStyle(color = Color(0xFF8F98A5), fontSize = 10.sp),
+            )
+            Spacer(Modifier.weight(1f))
+            BasicText(
+                "-${formatPlaybackTime(remaining)}",
+                style = TextStyle(color = Color(0xFF8F98A5), fontSize = 10.sp),
+            )
         }
     }
 }
@@ -3475,8 +3646,6 @@ private fun MobileSectionTopBar(
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -3506,47 +3675,7 @@ private fun MobileSectionTopBar(
             )
         }
 
-        Box {
-            VesperProfileAvatar(
-                name = userName,
-                imageUrl = userAvatarUrl,
-                modifier = Modifier
-                    .size(44.dp)
-                    .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
-                    .clickable { menuOpen = true },
-            )
-
-            if (menuOpen) {
-                Popup(
-                    alignment = Alignment.TopEnd,
-                    onDismissRequest = { menuOpen = false },
-                    properties = PopupProperties(focusable = true),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .width(220.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xF21A1C2A))
-                            .border(1.dp, Color(0x554C4D7B), RoundedCornerShape(18.dp))
-                            .padding(10.dp),
-                    ) {
-                        BasicText(
-                            userName,
-                            style = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-                        )
-                        ProfileMenuRow("⇄", "Switch profile") {
-                            menuOpen = false
-                            onSwitchProfile()
-                        }
-                        ProfileMenuRow("⚙", "Settings") {
-                            menuOpen = false
-                            onSettings()
-                        }
-                    }
-                }
-            }
-        }
+        Spacer(Modifier.size(44.dp))
     }
 }
 
@@ -4476,8 +4605,6 @@ private fun MobileTopBar(
     onSwitchProfile: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -4506,43 +4633,56 @@ private fun MobileTopBar(
             )
         }
 
-        Box {
-            VesperProfileAvatar(
-                name = userName,
-                imageUrl = userAvatarUrl,
-                modifier = Modifier
-                    .size(44.dp)
-                    .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
-                    .clickable { menuOpen = true },
-            )
+        Spacer(Modifier.size(44.dp))
+    }
+}
 
-            if (menuOpen) {
-                Popup(
-                    alignment = Alignment.TopEnd,
-                    onDismissRequest = { menuOpen = false },
-                    properties = PopupProperties(focusable = true),
+@Composable
+private fun PersistentProfileButton(
+    userName: String,
+    userAvatarUrl: String?,
+    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        VesperProfileAvatar(
+            name = userName,
+            imageUrl = userAvatarUrl,
+            modifier = Modifier
+                .size(44.dp)
+                .border(1.dp, Color(0x665B47D8), RoundedCornerShape(22.dp))
+                .clickable { menuOpen = true },
+        )
+
+        if (menuOpen) {
+            Popup(
+                alignment = Alignment.TopEnd,
+                onDismissRequest = { menuOpen = false },
+                properties = PopupProperties(focusable = true),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .width(220.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xF21A1C2A))
+                        .border(1.dp, Color(0x554C4D7B), RoundedCornerShape(18.dp))
+                        .padding(10.dp),
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .width(220.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xF21A1C2A))
-                            .border(1.dp, Color(0x554C4D7B), RoundedCornerShape(18.dp))
-                            .padding(10.dp),
-                    ) {
-                        BasicText(
-                            userName,
-                            style = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-                        )
-                        ProfileMenuRow("⇄", "Switch profile") {
-                            menuOpen = false
-                            onSwitchProfile()
-                        }
-                        ProfileMenuRow("⚙", "Settings") {
-                            menuOpen = false
-                            onSettings()
-                        }
+                    BasicText(
+                        userName,
+                        style = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                    )
+                    ProfileMenuRow("⇄", "Switch profile") {
+                        menuOpen = false
+                        onSwitchProfile()
+                    }
+                    ProfileMenuRow("⚙", "Settings") {
+                        menuOpen = false
+                        onSettings()
                     }
                 }
             }
@@ -5337,6 +5477,7 @@ private fun SearchBrowse(
     var seerrLoading by remember { mutableStateOf(false) }
     var seerrError by remember { mutableStateOf<String?>(null) }
     var seerrRefresh by remember { mutableStateOf(0) }
+    var selectedRequestItem by remember { mutableStateOf<SeerrSearchResult?>(null) }
 
     val all = remember(state) {
         (state.continueWatching + state.myV + state.movies + state.shows)
@@ -5508,11 +5649,21 @@ private fun SearchBrowse(
                             item = item,
                             onRequest = onSeerrRequest,
                             onRequested = { seerrRefresh++ },
+                            onOpenDetails = { selectedRequestItem = it },
                         )
                     }
                 }
             }
         }
+    }
+
+    selectedRequestItem?.let { item ->
+        MediaRequestDetailsPopup(
+            item = item,
+            onDismiss = { selectedRequestItem = null },
+            onRequest = onSeerrRequest,
+            onRequested = { seerrRefresh++ },
+        )
     }
 }
 
@@ -5550,6 +5701,7 @@ private fun SeerrMediaCard(
     item: SeerrSearchResult,
     onRequest: suspend (SeerrSearchResult) -> String?,
     onRequested: () -> Unit,
+    onOpenDetails: (SeerrSearchResult) -> Unit,
 ) {
     var mediaStatus by remember(item.tmdbId, item.mediaType, item.mediaStatus) {
         mutableStateOf(item.mediaStatus)
@@ -5575,7 +5727,8 @@ private fun SeerrMediaCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF111A23)),
+                .background(Color(0xFF111A23))
+                .clickable { onOpenDetails(item) },
         ) {
             AsyncImage(
                 modifier = Modifier.fillMaxSize(),
@@ -5592,7 +5745,14 @@ private fun SeerrMediaCard(
                     .padding(horizontal = 7.dp, vertical = 4.dp),
             ) {
                 BasicText(
-                    "REQUEST",
+                    when (mediaStatus) {
+                        SEERR_STATUS_PENDING -> "REQUESTED"
+                        SEERR_STATUS_PROCESSING -> "PROCESSING"
+                        SEERR_STATUS_PARTIALLY_AVAILABLE -> "PARTIAL"
+                        SEERR_STATUS_AVAILABLE -> "AVAILABLE"
+                        SEERR_STATUS_BLOCKLISTED -> "BLOCKED"
+                        else -> "REQUEST"
+                    },
                     style = TextStyle(
                         color = Color(0xFFBDEBFF),
                         fontSize = 9.sp,
@@ -5673,6 +5833,188 @@ private fun SeerrMediaCard(
                 ),
                 maxLines = 2,
             )
+        }
+    }
+}
+
+@Composable
+private fun MediaRequestDetailsPopup(
+    item: SeerrSearchResult,
+    onDismiss: () -> Unit,
+    onRequest: suspend (SeerrSearchResult) -> String?,
+    onRequested: () -> Unit,
+) {
+    var mediaStatus by remember(item.tmdbId, item.mediaType, item.mediaStatus) {
+        mutableStateOf(item.mediaStatus)
+    }
+    var requesting by remember(item.tmdbId, item.mediaType) { mutableStateOf(false) }
+    var message by remember(item.tmdbId, item.mediaType) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val requestEnabled =
+        !requesting && (mediaStatus == SEERR_STATUS_UNKNOWN || mediaStatus == SEERR_STATUS_DELETED)
+    val statusLabel = when (mediaStatus) {
+        SEERR_STATUS_PENDING -> "Requested"
+        SEERR_STATUS_PROCESSING -> "Processing"
+        SEERR_STATUS_PARTIALLY_AVAILABLE -> "Partially available"
+        SEERR_STATUS_AVAILABLE -> "Available"
+        SEERR_STATUS_BLOCKLISTED -> "Blocked"
+        else -> "Not requested"
+    }
+
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xF706090D))
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicText(
+                            "MEDIA REQUEST",
+                            style = TextStyle(
+                                color = Color(0xFFA98CFF),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.5.sp,
+                            ),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(21.dp))
+                                .background(Color(0x22FFFFFF))
+                                .clickable(onClick = onDismiss),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(
+                                "×",
+                                style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.SemiBold),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                }
+
+                item {
+                    Box(
+                        modifier = Modifier
+                            .width(220.dp)
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(Color(0xFF111A23)),
+                    ) {
+                        AsyncImage(
+                            modifier = Modifier.fillMaxSize(),
+                            url = item.posterUrl,
+                            scaleType = ImageView.ScaleType.CENTER_CROP,
+                        )
+                    }
+                    Spacer(Modifier.height(18.dp))
+                }
+
+                item {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        BasicText(
+                            item.title,
+                            style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold),
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        BasicText(
+                            listOfNotNull(
+                                item.year?.toString(),
+                                if (item.mediaType == "movie") "Movie" else "TV Series",
+                                statusLabel,
+                            ).joinToString("  •  "),
+                            style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp),
+                        )
+
+                        if (item.overview.isNotBlank()) {
+                            Spacer(Modifier.height(20.dp))
+                            BasicText(
+                                item.overview,
+                                style = TextStyle(
+                                    color = Color(0xFFD0D7DE),
+                                    fontSize = 15.sp,
+                                    lineHeight = 22.sp,
+                                ),
+                            )
+                        }
+
+                        Spacer(Modifier.height(22.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(17.dp))
+                                .background(
+                                    when {
+                                        mediaStatus == SEERR_STATUS_AVAILABLE -> Color(0xFF163224)
+                                        requestEnabled -> Color(0xFFEAF6FC)
+                                        else -> Color(0xFF17232D)
+                                    }
+                                )
+                                .clickable(enabled = requestEnabled) {
+                                    requesting = true
+                                    message = null
+                                    scope.launch {
+                                        val error = onRequest(item)
+                                        requesting = false
+                                        if (error == null || error == "Already requested.") {
+                                            mediaStatus = SEERR_STATUS_PENDING
+                                            message = if (error == null) "Request sent" else "Already requested"
+                                            onRequested()
+                                        } else {
+                                            message = error
+                                        }
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(
+                                when {
+                                    requesting -> "Requesting…"
+                                    requestEnabled -> "Request Media"
+                                    else -> statusLabel
+                                },
+                                style = TextStyle(
+                                    color = if (requestEnabled) Color(0xFF071017) else Color(0xFFD4DDE5),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                ),
+                            )
+                        }
+
+                        if (!message.isNullOrBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            BasicText(
+                                message.orEmpty(),
+                                style = TextStyle(
+                                    color = if (message == "Request sent" || message == "Already requested") {
+                                        Color(0xFF8EDCB2)
+                                    } else {
+                                        Color(0xFFFFA6A6)
+                                    },
+                                    fontSize = 11.sp,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
