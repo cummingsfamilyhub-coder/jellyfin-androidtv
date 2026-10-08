@@ -2120,7 +2120,27 @@ private fun VesperNowPlaying(
             val roomLabel = if (roomCount > 1) "$roomCount rooms" else player.name
 
             if (queueOpen) {
-                Column(Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(player.queueId) {
+                            var dragDistance = 0f
+                            val threshold = 65.dp.toPx()
+                            detectVerticalDragGestures(
+                                onDragStart = { dragDistance = 0f },
+                                onVerticalDrag = { change, amount ->
+                                    dragDistance += amount
+                                    if (dragDistance > threshold) {
+                                        queueOpen = false
+                                        dragDistance = 0f
+                                        change.consume()
+                                    }
+                                },
+                                onDragEnd = { dragDistance = 0f },
+                                onDragCancel = { dragDistance = 0f },
+                            )
+                        },
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2144,6 +2164,44 @@ private fun VesperNowPlaying(
                                     scaleType = ImageView.ScaleType.CENTER_CROP,
                                 )
                             } else {
+                                BasicText("♫", style = TextStyle(color = Color(0xFFA98CFF), fontSize = 24.sp))
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            BasicText(
+                                player.currentTitle ?: "Now Playing",
+                                style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                            )
+                            BasicText(
+                                player.currentArtist ?: roomLabel,
+                                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp),
+                                maxLines = 1,
+                            )
+                        }
+                        BasicText(
+                            "Now Playing",
+                            style = TextStyle(color = Color(0xFFC6ABFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Box(Modifier.weight(1f)) {
+                        MusicQueueView(
+                            player = player,
+                            onBack = { queueOpen = false },
+                            showBackButton = false,
+                            onLoadQueue = onLoadQueue,
+                            onEditQueue = onEditQueue,
+                            onClearQueue = onClearQueue,
+                            onPlayQueueItem = { item ->
+                                onPlayQueueItem(item)
+                                queueOpen = false
+                            },
+                        )
+                    }
+                }
+            } else {
                                 BasicText("♫", style = TextStyle(color = Color(0xFFA98CFF), fontSize = 24.sp))
                             }
                         }
@@ -2454,7 +2512,7 @@ private fun VesperNowPlaying(
                         contentAlignment = Alignment.Center,
                     ) {
                         BasicText(
-                            "⌃  Up Next",
+                            "Up Next",
                             style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
                         )
                     }
@@ -2502,6 +2560,7 @@ private fun VesperNowPlaying(
 private fun MusicQueueView(
     player: MaPlayer,
     onBack: () -> Unit,
+    showBackButton: Boolean = true,
     onLoadQueue: suspend (MaPlayer) -> List<MaQueueItem>,
     onPlayQueueItem: (MaQueueItem) -> Unit,
     onEditQueue: suspend (MaQueueItem, Int?, Boolean) -> Boolean,
@@ -2542,6 +2601,7 @@ private fun MusicQueueView(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (showBackButton) {
             Box(
                 modifier = Modifier
                     .size(42.dp)
@@ -2553,6 +2613,7 @@ private fun MusicQueueView(
                 BasicText("‹", style = TextStyle(color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold))
             }
             Spacer(Modifier.width(14.dp))
+            }
             Column(Modifier.weight(1f)) {
                 BasicText(
                     "Up Next",
