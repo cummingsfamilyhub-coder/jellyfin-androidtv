@@ -206,22 +206,38 @@ internal class MusicAssistantClient(
             .mapNotNull { playerJson ->
                 val playerId = playerJson.optString("player_id")
                 val activeSource = playerJson.optString("active_source").takeIf { it.isNotBlank() }
-                // Some players expose a parked queue from a previous session while
-                // current_media reflects the actual music playing. Never attach that
-                // unrelated queue (and its hours-long duration) to the live track.
+                // Music Assistant exposes the active queue through active_source.
+                // For a grouped/synced player it can instead belong to the group
+                // or sync leader, rather than the individual player's parked queue.
+                val activeGroup = playerJson.optString("active_group").takeIf { it.isNotBlank() }
+                val syncedTo = playerJson.optString("synced_to").takeIf { it.isNotBlank() }
                 val currentTitle = playerJson.optJSONObject("current_media")
                     ?.optString("title")?.trim()?.takeIf { it.isNotBlank() }
-                val candidates = listOfNotNull(queues[playerId], activeSource?.let(queues::get))
-                    .distinctBy { it.optString("queue_id") }
-                fun matchesCurrentTrack(queue: JSONObject): Boolean {
-                    if (currentTitle == null) return true
-                    val item = queue.optJSONObject("current_item") ?: return false
-                    val queuedTitle = item.optJSONObject("media_item")
+                fun queueTitle(queue: JSONObject): String? {
+                    val item = queue.optJSONObject("current_item") ?: return null
+                    return (item.optJSONObject("media_item")
                         ?.optString("name")?.takeIf { it.isNotBlank() }
-                        ?: item.optString("name")
-                    return queuedTitle.trim().equals(currentTitle, ignoreCase = true)
+                        ?: item.optString("name").takeIf { it.isNotBlank() })?.trim()
                 }
-                val queue = candidates.firstOrNull(::matchesCurrentTrack)
+                fun matchesCurrentTrack(queue: JSONObject): Boolean =
+                    currentTitle == null || queueTitle(queue)?.equals(currentTitle, ignoreCase = true) == true
+
+                // Prioritise the actual playback source, then group/leader.
+                // Only use a player's own parked queue if it matches playback.
+                val candidates = listOfNotNull(
+                    activeSource?.let(queues::get),
+                    activeGroup?.let(queues::get),
+                    syncedTo?.let(queues::get),
+                    queues[playerId],
+                ).distinctBy { it.optString("queue_id") }
+                val directMatch = candidates.firstOrNull(::matchesCurrentTrack)
+                // Some group players report a source that isn't a queue id.
+                // In that case locate the *unique* queue with this live track,
+                // rather than showing a stale unrelated queue or an empty view.
+                val matchingQueues = if (directMatch == null && currentTitle != null) {
+                    queues.values.filter(::matchesCurrentTrack)
+                } else emptyList()
+                val queue = directMatch ?: matchingQueues.singleOrNull()
                 parsePlayer(playerJson, queue)
             }
             .filter {
