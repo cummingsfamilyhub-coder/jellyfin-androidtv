@@ -212,7 +212,7 @@ internal class MusicAssistantClient(
         command(
             "player_queues/delete_item",
             JSONObject().put("queue_id", queueId)
-                .put("queue_item_id", queueItemId)
+                .put("item_id_or_index", queueItemId)
         )
     }
 
