@@ -243,6 +243,7 @@ class MobileMainActivity : FragmentActivity() {
                 onSeekMusic = ::seekMusic,
                 onLoadMusicQueue = ::loadMusicQueue,
                 onPlayMusicQueueItem = ::playMusicQueueItem,
+                onEditMusicQueue = ::editMusicQueue,
                 onUpdateMusicGroup = ::updateMusicGroup,
                 onSettings = ::openSettings,
             )
@@ -1225,6 +1226,21 @@ class MobileMainActivity : FragmentActivity() {
         }
     }
 
+    private suspend fun editMusicQueue(item: MaQueueItem, shift: Int?, remove: Boolean): Boolean {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return false
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val client = MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken)
+                if (remove) client.removeQueueItem(item.queueId, item.queueItemId)
+                else client.moveQueueItem(item.queueId, item.queueItemId, shift ?: return@runCatching)
+            }.onFailure { error ->
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MobileMainActivity, error.message ?: "Queue edit failed.", Toast.LENGTH_LONG).show()
+                }
+            }.isSuccess
+        }
+    }
+
     private fun playMusicQueueItem(item: MaQueueItem) {
         if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
         lifecycleScope.launch {
@@ -1621,6 +1637,7 @@ private fun VesperMobile(
     onSeekMusic: (MaPlayer, Int) -> Unit,
     onLoadMusicQueue: suspend (MaPlayer) -> List<MaQueueItem>,
     onPlayMusicQueueItem: (MaQueueItem) -> Unit,
+    onEditMusicQueue: suspend (MaQueueItem, Int?, Boolean) -> Boolean,
     onUpdateMusicGroup: (MaPlayer, Set<String>) -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -1827,6 +1844,7 @@ private fun VesperMobile(
                     },
                     onLoadQueue = onLoadMusicQueue,
                     onPlayQueueItem = onPlayMusicQueueItem,
+                    onEditQueue = onEditMusicQueue,
                     onRooms = { player ->
                         nowPlayingRoomsPlayerId = player.playerId
                     },
@@ -2008,6 +2026,7 @@ private fun VesperNowPlaying(
     onSeek: (MaPlayer, Int) -> Unit,
     onLoadQueue: suspend (MaPlayer) -> List<MaQueueItem>,
     onPlayQueueItem: (MaQueueItem) -> Unit,
+    onEditQueue: suspend (MaQueueItem, Int?, Boolean) -> Boolean,
     onRooms: (MaPlayer) -> Unit,
 ) {
     if (players.isEmpty()) return
@@ -2056,6 +2075,7 @@ private fun VesperNowPlaying(
                     player = player,
                     onBack = { queueOpen = false },
                     onLoadQueue = onLoadQueue,
+                    onEditQueue = onEditQueue,
                     onPlayQueueItem = { item ->
                         onPlayQueueItem(item)
                         queueOpen = false
@@ -2368,11 +2388,15 @@ private fun MusicQueueView(
     onBack: () -> Unit,
     onLoadQueue: suspend (MaPlayer) -> List<MaQueueItem>,
     onPlayQueueItem: (MaQueueItem) -> Unit,
+    onEditQueue: suspend (MaQueueItem, Int?, Boolean) -> Boolean,
 ) {
     var loading by remember(player.queueId) { mutableStateOf(true) }
     var error by remember(player.queueId) { mutableStateOf<String?>(null) }
     var queue by remember(player.queueId) { mutableStateOf<List<MaQueueItem>>(emptyList()) }
     val queueListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var editingId by remember(player.queueId) { mutableStateOf<String?>(null) }
+    var pendingRemove by remember(player.queueId) { mutableStateOf<MaQueueItem?>(null) }
 
     LaunchedEffect(player.queueId) {
         loading = true
@@ -2385,7 +2409,7 @@ private fun MusicQueueView(
 
     LaunchedEffect(player.queueId, player.queueCurrentIndex, queue, loading) {
         if (!loading && queue.isNotEmpty()) {
-            val playingIndex = queue.indexOfFirst { it.index == player.queueCurrentIndex }
+            val playingIndex = queue.indexOfFirst { it.index >= 0 && it.index == player.queueCurrentIndex && it.name.equals(player.currentTitle, ignoreCase = true) }
             if (playingIndex >= 0) queueListState.animateScrollToItem(playingIndex)
         }
     }
@@ -2424,6 +2448,22 @@ private fun MusicQueueView(
 
         Spacer(Modifier.height(18.dp))
 
+        pendingRemove?.let { item ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicText("Remove ${item.name}?", modifier = Modifier.weight(1f), style = TextStyle(color = Color.White, fontSize = 12.sp))
+                BasicText("Cancel", modifier = Modifier.clickable { pendingRemove = null }.padding(8.dp), style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp))
+                BasicText("Remove", modifier = Modifier.clickable {
+                    pendingRemove = null
+                    scope.launch {
+                        editingId = item.queueItemId
+                        if (onEditQueue(item, null, true)) queue = onLoadQueue(player).sortedBy(MaQueueItem::index)
+                        editingId = null
+                    }
+                }.padding(8.dp), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 12.sp))
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
         when {
             loading -> {
                 BasicText(
@@ -2451,8 +2491,9 @@ private fun MusicQueueView(
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     items(queue, key = { it.queueItemId }) { item ->
-                        val current = player.queueCurrentIndex == item.index
-                        val played = player.queueCurrentIndex?.let { item.index < it } == true
+                        val current = item.index >= 0 && player.queueCurrentIndex == item.index &&
+                            item.name.equals(player.currentTitle, ignoreCase = true)
+                        val played = item.index >= 0 && player.queueCurrentIndex?.let { item.index < it } == true
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2520,6 +2561,26 @@ private fun MusicQueueView(
                                     formatPlaybackTime(duration),
                                     style = TextStyle(color = Color(0xFF727B87), fontSize = 10.sp),
                                 )
+                            }
+                            if (!current) {
+                                Spacer(Modifier.width(6.dp))
+                                Column {
+                                    BasicText("↑", modifier = Modifier.clickable(enabled = editingId == null && item != queue.first()) {
+                                        scope.launch {
+                                            editingId = item.queueItemId
+                                            if (onEditQueue(item, -1, false)) queue = onLoadQueue(player).sortedBy(MaQueueItem::index)
+                                            editingId = null
+                                        }
+                                    }.padding(3.dp), style = TextStyle(color = Color(0xFFBEA5FF), fontSize = 17.sp))
+                                    BasicText("↓", modifier = Modifier.clickable(enabled = editingId == null && item != queue.last()) {
+                                        scope.launch {
+                                            editingId = item.queueItemId
+                                            if (onEditQueue(item, 1, false)) queue = onLoadQueue(player).sortedBy(MaQueueItem::index)
+                                            editingId = null
+                                        }
+                                    }.padding(3.dp), style = TextStyle(color = Color(0xFFBEA5FF), fontSize = 17.sp))
+                                }
+                                BasicText("×", modifier = Modifier.clickable(enabled = editingId == null) { pendingRemove = item }.padding(7.dp), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 19.sp))
                             }
                             if (current) {
                                 Spacer(Modifier.width(8.dp))
