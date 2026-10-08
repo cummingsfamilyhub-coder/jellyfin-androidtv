@@ -2564,21 +2564,53 @@ private fun MusicQueueView(
                             }
                             if (!current) {
                                 Spacer(Modifier.width(6.dp))
-                                Column {
-                                    BasicText("↑", modifier = Modifier.clickable(enabled = editingId == null && item != queue.first()) {
-                                        scope.launch {
-                                            editingId = item.queueItemId
-                                            if (onEditQueue(item, -1, false)) queue = onLoadQueue(player).sortedBy(MaQueueItem::index)
-                                            editingId = null
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    listOf(-1 to "↑", 1 to "↓").forEach { (shift, arrow) ->
+                                        val enabled = editingId == null &&
+                                            (if (shift < 0) item != queue.first() else item != queue.last())
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color(0x222F2549))
+                                                .clickable(enabled = enabled) {
+                                                    scope.launch {
+                                                        editingId = item.queueItemId
+                                                        try {
+                                                            if (onEditQueue(item, shift, false)) {
+                                                                val oldIndex = queue.indexOf(item)
+                                                                val newIndex = (oldIndex + shift).coerceIn(0, queue.lastIndex)
+                                                                val reordered = queue.toMutableList()
+                                                                reordered.removeAt(oldIndex)
+                                                                reordered.add(newIndex, item)
+                                                                queue = reordered
+                                                                val refreshed = onLoadQueue(player)
+                                                                if (refreshed.any { it.index >= 0 }) {
+                                                                    queue = refreshed.sortedBy(MaQueueItem::index)
+                                                                } else {
+                                                                    queue = refreshed.sortedBy { refreshedItem ->
+                                                                        reordered.indexOfFirst { it.queueItemId == refreshedItem.queueItemId }
+                                                                    }
+                                                                }
+                                                            }
+                                                        } finally {
+                                                            editingId = null
+                                                        }
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            BasicText(
+                                                arrow,
+                                                style = TextStyle(
+                                                    color = if (enabled) Color(0xFFBEA5FF) else Color(0xFF60616B),
+                                                    fontSize = 22.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                ),
+                                            )
                                         }
-                                    }.padding(3.dp), style = TextStyle(color = Color(0xFFBEA5FF), fontSize = 17.sp))
-                                    BasicText("↓", modifier = Modifier.clickable(enabled = editingId == null && item != queue.last()) {
-                                        scope.launch {
-                                            editingId = item.queueItemId
-                                            if (onEditQueue(item, 1, false)) queue = onLoadQueue(player).sortedBy(MaQueueItem::index)
-                                            editingId = null
-                                        }
-                                    }.padding(3.dp), style = TextStyle(color = Color(0xFFBEA5FF), fontSize = 17.sp))
+                                        Spacer(Modifier.width(4.dp))
+                                    }
                                 }
                                 BasicText("×", modifier = Modifier.clickable(enabled = editingId == null) { pendingRemove = item }.padding(7.dp), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 19.sp))
                             }
