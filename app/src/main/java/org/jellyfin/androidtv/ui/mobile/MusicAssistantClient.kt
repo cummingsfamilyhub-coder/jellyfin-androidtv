@@ -206,10 +206,22 @@ internal class MusicAssistantClient(
             .mapNotNull { playerJson ->
                 val playerId = playerJson.optString("player_id")
                 val activeSource = playerJson.optString("active_source").takeIf { it.isNotBlank() }
-                // The player's active source may be an external input rather than its
-                // Music Assistant queue. Prefer the queue owned by this player;
-                // only use active_source when it resolves to an actual queue.
-                val queue = queues[playerId] ?: activeSource?.let(queues::get)
+                // Some players expose a parked queue from a previous session while
+                // current_media reflects the actual music playing. Never attach that
+                // unrelated queue (and its hours-long duration) to the live track.
+                val currentTitle = playerJson.optJSONObject("current_media")
+                    ?.optString("title")?.trim()?.takeIf { it.isNotBlank() }
+                val candidates = listOfNotNull(queues[playerId], activeSource?.let(queues::get))
+                    .distinctBy { it.optString("queue_id") }
+                fun matchesCurrentTrack(queue: JSONObject): Boolean {
+                    if (currentTitle == null) return true
+                    val item = queue.optJSONObject("current_item") ?: return false
+                    val queuedTitle = item.optJSONObject("media_item")
+                        ?.optString("name")?.takeIf { it.isNotBlank() }
+                        ?: item.optString("name")
+                    return queuedTitle.trim().equals(currentTitle, ignoreCase = true)
+                }
+                val queue = candidates.firstOrNull(::matchesCurrentTrack)
                 parsePlayer(playerJson, queue)
             }
             .filter {
