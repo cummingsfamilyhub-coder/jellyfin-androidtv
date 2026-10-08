@@ -2448,6 +2448,7 @@ private fun MusicQueueView(
     var editingId by remember(player.queueId) { mutableStateOf<String?>(null) }
     var pendingRemove by remember(player.queueId) { mutableStateOf<MaQueueItem?>(null) }
     var confirmClear by remember(player.queueId) { mutableStateOf(false) }
+    var selectedQueueItemId by remember(player.queueId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(player.queueId) {
         loading = true
@@ -2486,7 +2487,7 @@ private fun MusicQueueView(
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 BasicText(
-                    "Queue",
+                    "Up Next",
                     style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold),
                 )
                 BasicText(
@@ -2495,7 +2496,7 @@ private fun MusicQueueView(
                 )
             }
             BasicText(
-                if (queue.isEmpty()) "" else "${upcoming.size} upcoming",
+                if (queue.isEmpty()) "" else "${(upcoming.size - 1).coerceAtLeast(0)} upcoming",
                 style = TextStyle(color = Color(0xFF8F98A5), fontSize = 11.sp),
             )
             Spacer(Modifier.width(12.dp))
@@ -2586,11 +2587,12 @@ private fun MusicQueueView(
                                 .background(
                                     when {
                                         current -> Color(0x663D286D)
+                                        item.queueItemId == selectedQueueItemId -> Color(0x332C244A)
                                         else -> Color.Transparent
                                     }
                                 )
                                 .clickable(enabled = !current && !played) {
-                                    onPlayQueueItem(item)
+                                    selectedQueueItemId = if (selectedQueueItemId == item.queueItemId) null else item.queueItemId
                                 }
                                 .padding(horizontal = 10.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -2647,17 +2649,17 @@ private fun MusicQueueView(
                                     style = TextStyle(color = Color(0xFF727B87), fontSize = 10.sp),
                                 )
                             }
-                            if (!current) {
+                            if (!current && item.queueItemId == selectedQueueItemId) {
                                 Spacer(Modifier.width(6.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    listOf(-1 to "↑", 1 to "↓").forEach { (shift, arrow) ->
+                                    listOf(-1 to "⌃", 1 to "⌄").forEach { (shift, arrow) ->
                                         val enabled = editingId == null &&
                                             (if (shift < 0) item != upcoming.first() else item != upcoming.last())
                                         Box(
                                             modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(Color(0x222F2549))
+                                                .size(34.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color(0x663D286D))
                                                 .clickable(enabled = enabled) {
                                                     scope.launch {
                                                         editingId = item.queueItemId
@@ -2683,7 +2685,7 @@ private fun MusicQueueView(
                                                 arrow,
                                                 style = TextStyle(
                                                     color = if (enabled) Color(0xFFBEA5FF) else Color(0xFF60616B),
-                                                    fontSize = 22.sp,
+                                                    fontSize = 20.sp,
                                                     fontWeight = FontWeight.Bold,
                                                 ),
                                             )
@@ -2691,7 +2693,11 @@ private fun MusicQueueView(
                                         Spacer(Modifier.width(4.dp))
                                     }
                                 }
-                                BasicText("×", modifier = Modifier.clickable(enabled = editingId == null) { pendingRemove = item }.padding(7.dp), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 19.sp))
+                                BasicText("×", modifier = Modifier.clickable(enabled = editingId == null) { pendingRemove = item }.padding(5.dp), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 18.sp))
+                                BasicText("▶", modifier = Modifier.clickable { onPlayQueueItem(item) }.padding(5.dp), style = TextStyle(color = Color(0xFFBEA5FF), fontSize = 15.sp))
+                            }
+                            if (!current && item.queueItemId != selectedQueueItemId) {
+                                BasicText("⋯", style = TextStyle(color = Color(0xFF998AB9), fontSize = 22.sp))
                             }
                             if (current) {
                                 Spacer(Modifier.width(8.dp))
