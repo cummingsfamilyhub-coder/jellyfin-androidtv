@@ -206,7 +206,10 @@ internal class MusicAssistantClient(
             .mapNotNull { playerJson ->
                 val playerId = playerJson.optString("player_id")
                 val activeSource = playerJson.optString("active_source").takeIf { it.isNotBlank() }
-                val queue = activeSource?.let(queues::get) ?: queues[playerId]
+                // The player's active source may be an external input rather than its
+                // Music Assistant queue. Prefer the queue owned by this player;
+                // only use active_source when it resolves to an actual queue.
+                val queue = queues[playerId] ?: activeSource?.let(queues::get)
                 parsePlayer(playerJson, queue)
             }
             .filter {
