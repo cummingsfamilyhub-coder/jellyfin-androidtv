@@ -44,6 +44,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -2371,6 +2372,7 @@ private fun MusicQueueView(
     var loading by remember(player.queueId) { mutableStateOf(true) }
     var error by remember(player.queueId) { mutableStateOf<String?>(null) }
     var queue by remember(player.queueId) { mutableStateOf<List<MaQueueItem>>(emptyList()) }
+    val queueListState = rememberLazyListState()
 
     LaunchedEffect(player.queueId) {
         loading = true
@@ -2379,6 +2381,13 @@ private fun MusicQueueView(
             .onSuccess { queue = it.sortedBy(MaQueueItem::index) }
             .onFailure { error = it.message ?: "Couldn't load the queue." }
         loading = false
+    }
+
+    LaunchedEffect(player.queueId, player.queueCurrentIndex, queue, loading) {
+        if (!loading && queue.isNotEmpty()) {
+            val playingIndex = queue.indexOfFirst { it.index == player.queueCurrentIndex }
+            if (playingIndex >= 0) queueListState.animateScrollToItem(playingIndex)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -2436,6 +2445,7 @@ private fun MusicQueueView(
             }
             else -> {
                 LazyColumn(
+                    state = queueListState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -2449,7 +2459,7 @@ private fun MusicQueueView(
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(
                                     when {
-                                        current -> Color(0x332F235D)
+                                        current -> Color(0x663D286D)
                                         else -> Color.Transparent
                                     }
                                 )
@@ -2514,8 +2524,8 @@ private fun MusicQueueView(
                             if (current) {
                                 Spacer(Modifier.width(8.dp))
                                 BasicText(
-                                    "NOW",
-                                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                    if (player.playbackState == "playing") "♫ Now Playing" else "Ⅱ Paused",
+                                    style = TextStyle(color = Color(0xFFBEA5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold),
                                 )
                             }
                         }
