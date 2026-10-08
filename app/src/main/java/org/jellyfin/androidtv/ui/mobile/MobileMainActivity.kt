@@ -168,17 +168,15 @@ class MobileMainActivity : FragmentActivity() {
         seerrApiKey = vesperPreferences
             .getString("seerr_api_key", "")
             .orEmpty()
-        musicAssistantBaseUrl = vesperPreferences
-            .getString("music_assistant_url", "http://192.168.1.34:8095")
-            .orEmpty()
+        musicAssistantBaseUrl = VesperServiceConfig.musicAssistantUrl(vesperPreferences)
         musicAssistantToken = vesperPreferences
             .getString("music_assistant_token", "")
             .orEmpty()
-        musicRequestsUrl = vesperPreferences.getString("music_requests_url", "").orEmpty()
+        musicRequestsUrl = VesperServiceConfig.aurralUrl(vesperPreferences)
         musicRequestsApiKey = vesperPreferences.getString("music_requests_api_key", "").orEmpty()
-        bookRequestsUrl = vesperPreferences.getString("book_requests_url", "").orEmpty()
+        bookRequestsUrl = VesperServiceConfig.lazyLibrarianUrl(vesperPreferences)
         bookRequestsApiKey = vesperPreferences.getString("book_requests_api_key", "").orEmpty()
-        audiobookLibraryUrl = vesperPreferences.getString("audiobook_library_url", "").orEmpty()
+        audiobookLibraryUrl = VesperServiceConfig.audiobookshelfUrl(vesperPreferences)
         audiobookLibraryToken = vesperPreferences.getString("audiobook_library_token", "").orEmpty()
         showPersistentMiniPlayer = vesperPreferences
             .getBoolean("show_persistent_mini_player", true)

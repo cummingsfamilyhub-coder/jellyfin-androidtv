@@ -595,15 +595,13 @@ class MobileSettingsActivity : FragmentActivity() {
         tvdbApiKey = preferences.getString("tvdb_api_key", "").orEmpty()
         tvdbSubscriberPin = preferences.getString("tvdb_subscriber_pin", "").orEmpty()
         seerrApiKey = preferences.getString("seerr_api_key", "").orEmpty()
-        musicAssistantUrl = preferences
-            .getString("music_assistant_url", "http://192.168.1.34:8095")
-            .orEmpty()
+        musicAssistantUrl = VesperServiceConfig.musicAssistantUrl(preferences)
         musicAssistantToken = preferences.getString("music_assistant_token", "").orEmpty()
-        musicRequestsUrl = preferences.getString("music_requests_url", "").orEmpty()
+        musicRequestsUrl = VesperServiceConfig.aurralUrl(preferences)
         musicRequestsApiKey = preferences.getString("music_requests_api_key", "").orEmpty()
-        bookRequestsUrl = preferences.getString("book_requests_url", "").orEmpty()
+        bookRequestsUrl = VesperServiceConfig.lazyLibrarianUrl(preferences)
         bookRequestsApiKey = preferences.getString("book_requests_api_key", "").orEmpty()
-        audiobookLibraryUrl = preferences.getString("audiobook_library_url", "").orEmpty()
+        audiobookLibraryUrl = VesperServiceConfig.audiobookshelfUrl(preferences)
         audiobookLibraryToken = preferences.getString("audiobook_library_token", "").orEmpty()
     }
 

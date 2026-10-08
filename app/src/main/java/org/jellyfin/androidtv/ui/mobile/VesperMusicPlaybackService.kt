@@ -28,6 +28,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.VesperServiceConfig
 
 /**
  * Owns Vesper's "This Device" player independently from the mobile activity.
@@ -90,7 +91,7 @@ internal class VesperMusicPlaybackService : Service() {
 
     private fun configureFromPreferences() {
         val preferences = getSharedPreferences(PREFERENCES_NAME, MODE_PRIVATE)
-        val baseUrl = preferences.getString("music_assistant_url", "").orEmpty().trim().trimEnd('/')
+        val baseUrl = VesperServiceConfig.musicAssistantUrl(preferences).trimEnd('/')
         val token = preferences.getString("music_assistant_token", "").orEmpty().trim()
 
         if (baseUrl.isBlank() || token.isBlank()) {

@@ -594,5 +594,5 @@
     <string name="vesper_music_assistant_token_label">Long-lived Music Assistant token</string>
     <string name="vesper_music_assistant_token_hint">Long-lived access token</string>
     <string name="vesper_music_assistant_setup_help">Create one in Music Assistant → Settings → Profile. Vesper uses it for your music library, rooms and playback.</string>
-    <string name="vesper_music_assistant_url_hint" translatable="false">http://192.168.1.34:8095</string>
+    <string name="vesper_music_assistant_url_hint" translatable="false">https://vesper-music.duckdns.org</string>
 </resources>
