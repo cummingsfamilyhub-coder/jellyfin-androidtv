@@ -208,6 +208,20 @@ internal class MusicAssistantClient(
         )
     }
 
+    fun enqueue(item: MaMediaItem, queueId: String, next: Boolean) {
+        command(
+            "player_queues/play_media",
+            JSONObject()
+                .put("queue_id", queueId)
+                .put("media", item.uri)
+                .put("option", if (next) "next" else "add")
+        )
+    }
+
+    fun clearQueue(queueId: String) {
+        command("player_queues/clear", JSONObject().put("queue_id", queueId))
+    }
+
     fun removeQueueItem(queueId: String, queueItemId: String) {
         command(
             "player_queues/delete_item",
