@@ -1831,9 +1831,9 @@ private fun VesperMobile(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
 
-            if (nowPlayingQueueId != null && musicSessions.isNotEmpty()) {
+            if (nowPlayingQueueId != null) {
                 VesperNowPlaying(
-                    players = musicSessions,
+                    players = if (musicSessions.isNotEmpty()) musicSessions else musicState.snapshot.players,
                     initialQueueId = nowPlayingQueueId,
                     onDismiss = { nowPlayingQueueId = null },
                     onControl = { player, action ->
@@ -2000,6 +2000,7 @@ private fun VesperMiniPlayer(
             ) {
                 BasicText(
                     if (player.playbackState == "playing") "Ⅱ" else "▶",
+                    modifier = if (player.playbackState == "playing") Modifier else Modifier.offset(x = 1.dp),
                     style = TextStyle(
                         color = Color(0xFF101820),
                         fontSize = if (player.playbackState == "playing") 15.sp else 19.sp,
@@ -2584,14 +2585,8 @@ private fun MusicQueueView(
                                                                 reordered.removeAt(oldIndex)
                                                                 reordered.add(newIndex, item)
                                                                 queue = reordered
-                                                                val refreshed = onLoadQueue(player)
-                                                                if (refreshed.any { it.index >= 0 }) {
-                                                                    queue = refreshed.sortedBy(MaQueueItem::index)
-                                                                } else {
-                                                                    queue = refreshed.sortedBy { refreshedItem ->
-                                                                        reordered.indexOfFirst { it.queueItemId == refreshedItem.queueItemId }
-                                                                    }
-                                                                }
+                                                                // Avoid reloading all 500 items on every tap.
+                                                                // The server is authoritative; reload on the next queue opening.
                                                             }
                                                         } finally {
                                                             editingId = null
