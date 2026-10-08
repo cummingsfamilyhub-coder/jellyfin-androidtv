@@ -2162,6 +2162,44 @@ private fun VesperNowPlaying(
                                     scaleType = ImageView.ScaleType.CENTER_CROP,
                                 )
                             } else {
+                                BasicText("♫", style = TextStyle(color = Color(0xFFA98CFF), fontSize = 24.sp))
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            BasicText(
+                                player.currentTitle ?: "Now Playing",
+                                style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                            )
+                            BasicText(
+                                player.currentArtist ?: roomLabel,
+                                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp),
+                                maxLines = 1,
+                            )
+                        }
+                        BasicText(
+                            "Now Playing",
+                            style = TextStyle(color = Color(0xFFC6ABFF), fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Box(Modifier.weight(1f)) {
+                        MusicQueueView(
+                            player = player,
+                            onBack = { queueOpen = false },
+                            showBackButton = false,
+                            onLoadQueue = onLoadQueue,
+                            onEditQueue = onEditQueue,
+                            onClearQueue = onClearQueue,
+                            onPlayQueueItem = { item ->
+                                onPlayQueueItem(item)
+                                queueOpen = false
+                            },
+                        )
+                    }
+                }
+            } else {
                 Column(
                 modifier = Modifier
                     .fillMaxSize()
