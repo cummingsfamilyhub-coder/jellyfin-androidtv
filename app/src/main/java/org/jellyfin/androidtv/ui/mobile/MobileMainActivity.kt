@@ -245,6 +245,8 @@ class MobileMainActivity : FragmentActivity() {
                 onLoadMusicQueue = ::loadMusicQueue,
                 onPlayMusicQueueItem = ::playMusicQueueItem,
                 onEditMusicQueue = ::editMusicQueue,
+                onClearMusicQueue = ::clearMusicQueue,
+                onEnqueueMusic = ::enqueueMusic,
                 onUpdateMusicGroup = ::updateMusicGroup,
                 onSettings = ::openSettings,
             )
@@ -1071,6 +1073,45 @@ class MobileMainActivity : FragmentActivity() {
         }
     }
 
+    private fun enqueueMusic(item: MaMediaItem, player: MaPlayer, next: Boolean) {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+        lifecycleScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken)
+                        .enqueue(item, player.queueId, next)
+                }
+            }.onSuccess {
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    if (next) "Playing next: ${item.name}" else "Added to queue: ${item.name}",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                refreshMusicPlayers()
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    error.message ?: "Couldn't add to queue.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    private suspend fun clearMusicQueue(player: MaPlayer): Boolean {
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return false
+        return try {
+            withContext(Dispatchers.IO) {
+                MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken)
+                    .clearQueue(player.queueId)
+            }
+            true
+        } catch (error: Exception) {
+            Toast.makeText(this@MobileMainActivity, error.message ?: "Couldn't clear queue.", Toast.LENGTH_LONG).show()
+            false
+        }
+    }
+
     private fun preservePausedPlayerMetadata(
         previous: List<MaPlayer>,
         refreshed: List<MaPlayer>,
@@ -1639,6 +1680,8 @@ private fun VesperMobile(
     onLoadMusicQueue: suspend (MaPlayer) -> List<MaQueueItem>,
     onPlayMusicQueueItem: (MaQueueItem) -> Unit,
     onEditMusicQueue: suspend (MaQueueItem, Int?, Boolean) -> Boolean,
+    onClearMusicQueue: suspend (MaPlayer) -> Boolean,
+    onEnqueueMusic: (MaMediaItem, MaPlayer, Boolean) -> Unit,
     onUpdateMusicGroup: (MaPlayer, Set<String>) -> Unit,
     onSettings: () -> Unit,
 ) {
@@ -1793,6 +1836,7 @@ private fun VesperMobile(
                     onBookRequest = onBookRequest,
                     musicPlayers = musicState.snapshot.players,
                     onPlayMusic = onPlayMusic,
+                    onEnqueueMusic = onEnqueueMusic,
                     onSelect = onSelect,
                     onToggleFavorite = onToggleFavorite,
                     expanded = expanded,
@@ -1846,6 +1890,7 @@ private fun VesperMobile(
                     onLoadQueue = onLoadMusicQueue,
                     onPlayQueueItem = onPlayMusicQueueItem,
                     onEditQueue = onEditMusicQueue,
+                    onClearQueue = onClearMusicQueue,
                     onRooms = { player ->
                         nowPlayingRoomsPlayerId = player.playerId
                     },
@@ -2029,6 +2074,7 @@ private fun VesperNowPlaying(
     onLoadQueue: suspend (MaPlayer) -> List<MaQueueItem>,
     onPlayQueueItem: (MaQueueItem) -> Unit,
     onEditQueue: suspend (MaQueueItem, Int?, Boolean) -> Boolean,
+    onClearQueue: suspend (MaPlayer) -> Boolean,
     onRooms: (MaPlayer) -> Unit,
 ) {
     if (players.isEmpty()) return
@@ -2078,6 +2124,7 @@ private fun VesperNowPlaying(
                     onBack = { queueOpen = false },
                     onLoadQueue = onLoadQueue,
                     onEditQueue = onEditQueue,
+                    onClearQueue = onClearQueue,
                     onPlayQueueItem = { item ->
                         onPlayQueueItem(item)
                         queueOpen = false
@@ -2391,6 +2438,7 @@ private fun MusicQueueView(
     onLoadQueue: suspend (MaPlayer) -> List<MaQueueItem>,
     onPlayQueueItem: (MaQueueItem) -> Unit,
     onEditQueue: suspend (MaQueueItem, Int?, Boolean) -> Boolean,
+    onClearQueue: suspend (MaPlayer) -> Boolean,
 ) {
     var loading by remember(player.queueId) { mutableStateOf(true) }
     var error by remember(player.queueId) { mutableStateOf<String?>(null) }
@@ -2399,6 +2447,7 @@ private fun MusicQueueView(
     val scope = rememberCoroutineScope()
     var editingId by remember(player.queueId) { mutableStateOf<String?>(null) }
     var pendingRemove by remember(player.queueId) { mutableStateOf<MaQueueItem?>(null) }
+    var confirmClear by remember(player.queueId) { mutableStateOf(false) }
 
     LaunchedEffect(player.queueId) {
         loading = true
@@ -2446,9 +2495,41 @@ private fun MusicQueueView(
                 if (queue.isEmpty()) "" else "${queue.size} tracks",
                 style = TextStyle(color = Color(0xFF8F98A5), fontSize = 11.sp),
             )
+            Spacer(Modifier.width(12.dp))
+            BasicText(
+                "Clear",
+                modifier = Modifier.clickable(enabled = queue.isNotEmpty() && editingId == null) {
+                    confirmClear = true
+                }.padding(8.dp),
+                style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 12.sp),
+            )
         }
 
         Spacer(Modifier.height(18.dp))
+
+        if (confirmClear) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicText(
+                    "Clear the entire queue, including the current track?",
+                    modifier = Modifier.weight(1f),
+                    style = TextStyle(color = Color.White, fontSize = 12.sp),
+                )
+                BasicText("Cancel", modifier = Modifier.clickable { confirmClear = false }.padding(8.dp),
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp))
+                BasicText("Clear", modifier = Modifier.clickable {
+                    confirmClear = false
+                    scope.launch {
+                        editingId = "clear"
+                        try {
+                            if (onClearQueue(player)) queue = emptyList()
+                        } finally {
+                            editingId = null
+                        }
+                    }
+                }.padding(8.dp), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 12.sp))
+            }
+            Spacer(Modifier.height(10.dp))
+        }
 
         pendingRemove?.let { item ->
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -6810,6 +6891,7 @@ private fun SearchBrowse(
     onBookRequest: suspend (VesperBookRequestResult, Boolean) -> String?,
     musicPlayers: List<MaPlayer>,
     onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
+    onEnqueueMusic: (MaMediaItem, MaPlayer, Boolean) -> Unit,
     onSelect: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
     expanded: Boolean,
@@ -6839,6 +6921,7 @@ private fun SearchBrowse(
     var selectedMusicRequest by remember { mutableStateOf<VesperMusicRequestResult?>(null) }
     var selectedBookRequest by remember { mutableStateOf<VesperBookRequestResult?>(null) }
     var pendingMusicItem by remember { mutableStateOf<MaMediaItem?>(null) }
+    var pendingQueueMusicItem by remember { mutableStateOf<MaMediaItem?>(null) }
 
     val cleanQuery = query.trim()
     val fallbackVideo = remember(state) {
@@ -7147,6 +7230,9 @@ private fun SearchBrowse(
                             onClick = {
                                 if (item.playable) pendingMusicItem = item
                             },
+                            onQueue = {
+                                if (item.playable) pendingQueueMusicItem = item
+                            },
                         )
                     }
 
@@ -7224,6 +7310,41 @@ private fun SearchBrowse(
         )
     }
 
+    pendingQueueMusicItem?.let { item ->
+        val target = musicPlayers.firstOrNull {
+            it.name.equals("This Device", ignoreCase = true) &&
+                it.playbackState in listOf("playing", "paused")
+        } ?: musicPlayers.firstOrNull { it.playbackState in listOf("playing", "paused") }
+        Popup(
+            alignment = Alignment.Center,
+            onDismissRequest = { pendingQueueMusicItem = null },
+            properties = PopupProperties(focusable = true),
+        ) {
+            Column(
+                modifier = Modifier.width(300.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF171725))
+                    .padding(18.dp),
+            ) {
+                BasicText(item.name, style = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold))
+                Spacer(Modifier.height(8.dp))
+                BasicText("Queue: ${target?.name ?: "No active player"}",
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp))
+                Spacer(Modifier.height(12.dp))
+                listOf(true to "Play Next", false to "Add to Queue").forEach { (next, label) ->
+                    BasicText(label,
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = target != null) {
+                            target?.let { onEnqueueMusic(item, it, next) }
+                            pendingQueueMusicItem = null
+                        }.padding(12.dp),
+                        style = TextStyle(color = if (target == null) Color.Gray else Color.White, fontSize = 15.sp))
+                }
+                BasicText("Cancel", modifier = Modifier.clickable { pendingQueueMusicItem = null }.padding(12.dp),
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp))
+            }
+        }
+    }
+
     pendingMusicItem?.let { item ->
         MusicRoomPicker(
             item = item,
@@ -7270,6 +7391,7 @@ private fun SearchSectionHeader(
 private fun SearchMusicLibraryCard(
     item: MaMediaItem,
     onClick: () -> Unit,
+    onQueue: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -7300,6 +7422,19 @@ private fun SearchMusicLibraryCard(
                         fontWeight = FontWeight.Bold,
                     ),
                 )
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xDD171725))
+                    .clickable(enabled = item.playable, onClick = onQueue),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText("⋮", style = TextStyle(color = Color.White, fontSize = 22.sp))
             }
 
             Box(
