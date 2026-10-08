@@ -2449,6 +2449,7 @@ private fun MusicQueueView(
     var pendingRemove by remember(player.queueId) { mutableStateOf<MaQueueItem?>(null) }
     var confirmClear by remember(player.queueId) { mutableStateOf(false) }
     var selectedQueueItemId by remember(player.queueId) { mutableStateOf<String?>(null) }
+    var queueActionsItemId by remember(player.queueId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(player.queueId) {
         loading = true
@@ -2651,15 +2652,19 @@ private fun MusicQueueView(
                             }
                             if (!current && item.queueItemId == selectedQueueItemId) {
                                 Spacer(Modifier.width(6.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    listOf(-1 to "⌃", 1 to "⌄").forEach { (shift, arrow) ->
+                                Column(
+                                    modifier = Modifier
+                                        .width(34.dp)
+                                        .clip(RoundedCornerShape(13.dp))
+                                        .background(Color(0x553B2B59)),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    listOf(-1 to "⌃", 1 to "⌄").forEach { (shift, chevron) ->
                                         val enabled = editingId == null &&
                                             (if (shift < 0) item != upcoming.first() else item != upcoming.last())
                                         Box(
                                             modifier = Modifier
-                                                .size(34.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(Color(0x663D286D))
+                                                .size(width = 34.dp, height = 28.dp)
                                                 .clickable(enabled = enabled) {
                                                     scope.launch {
                                                         editingId = item.queueItemId
@@ -2682,22 +2687,51 @@ private fun MusicQueueView(
                                             contentAlignment = Alignment.Center,
                                         ) {
                                             BasicText(
-                                                arrow,
+                                                chevron,
                                                 style = TextStyle(
-                                                    color = if (enabled) Color(0xFFBEA5FF) else Color(0xFF60616B),
-                                                    fontSize = 20.sp,
+                                                    color = if (enabled) Color(0xFFC6ABFF) else Color(0xFF666074),
+                                                    fontSize = 18.sp,
                                                     fontWeight = FontWeight.Bold,
                                                 ),
                                             )
                                         }
-                                        Spacer(Modifier.width(4.dp))
+                                        if (shift < 0) {
+                                            Box(Modifier.width(18.dp).height(1.dp).background(Color(0x334C3B69)))
+                                        }
                                     }
                                 }
-                                BasicText("×", modifier = Modifier.clickable(enabled = editingId == null) { pendingRemove = item }.padding(5.dp), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 18.sp))
-                                BasicText("▶", modifier = Modifier.clickable { onPlayQueueItem(item) }.padding(5.dp), style = TextStyle(color = Color(0xFFBEA5FF), fontSize = 15.sp))
                             }
-                            if (!current && item.queueItemId != selectedQueueItemId) {
-                                BasicText("⋯", style = TextStyle(color = Color(0xFF998AB9), fontSize = 22.sp))
+                            if (!current) {
+                                Box {
+                                    BasicText(
+                                        "⋮",
+                                        modifier = Modifier
+                                            .clickable { queueActionsItemId = item.queueItemId }
+                                            .padding(horizontal = 8.dp, vertical = 7.dp),
+                                        style = TextStyle(color = Color(0xFFAA9DBD), fontSize = 20.sp),
+                                    )
+                                    if (queueActionsItemId == item.queueItemId) {
+                                        androidx.compose.material3.DropdownMenu(
+                                            expanded = true,
+                                            onDismissRequest = { queueActionsItemId = null },
+                                        ) {
+                                            androidx.compose.material3.DropdownMenuItem(
+                                                text = { BasicText("Play now", style = TextStyle(color = Color.White)) },
+                                                onClick = {
+                                                    queueActionsItemId = null
+                                                    onPlayQueueItem(item)
+                                                },
+                                            )
+                                            androidx.compose.material3.DropdownMenuItem(
+                                                text = { BasicText("Remove from queue", style = TextStyle(color = Color.White)) },
+                                                onClick = {
+                                                    queueActionsItemId = null
+                                                    pendingRemove = item
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
                             }
                             if (current) {
                                 Spacer(Modifier.width(8.dp))
