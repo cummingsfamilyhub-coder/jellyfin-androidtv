@@ -44,6 +44,7 @@ internal data class MaPlayer(
     val canGroupWith: Set<String>,
     val queueItemCount: Int,
     val queueCurrentIndex: Int?,
+    val queueCurrentItemId: String? = null,
     val queueResumePosition: Int,
     val queueElapsedTime: Int,
     val queueDuration: Int,
@@ -179,14 +180,20 @@ internal class MusicAssistantClient(
         )
     }
 
-    fun loadQueue(queueId: String): List<MaQueueItem> =
-        commandArray(
-            "player_queues/items",
-            JSONObject()
-                .put("queue_id", queueId)
-                .put("limit", 500)
-                .put("offset", 0)
-        ).mapNotNull(::parseQueueItem)
+    fun loadQueue(queueId: String): List<MaQueueItem> {
+        val result = mutableListOf<MaQueueItem>()
+        var offset = 0
+        while (true) {
+            val batch = commandArray(
+                "player_queues/items",
+                JSONObject().put("queue_id", queueId).put("limit", 250).put("offset", offset)
+            ).mapNotNull(::parseQueueItem)
+            result.addAll(batch)
+            if (batch.size < 250 || result.size >= 5000) break
+            offset += batch.size
+        }
+        return result
+    }
 
     fun playQueueItem(queueId: String, queueItemId: String) {
         command(
@@ -216,6 +223,18 @@ internal class MusicAssistantClient(
                 .put("media", item.uri)
                 .put("option", if (next) "next" else "add")
         )
+    }
+
+    fun clearUpcoming(queueId: String, currentItemId: String, currentIndex: Int?) {
+        val allItems = loadQueue(queueId)
+        val currentPosition = allItems.indexOfFirst { it.queueItemId == currentItemId }
+            .takeIf { it >= 0 }
+            ?: currentIndex?.takeIf { it in allItems.indices }
+            ?: throw IllegalStateException("Can't identify the playing song. Queue unchanged.")
+        // Delete backwards so position shifts cannot affect the remaining queue.
+        for (item in allItems.drop(currentPosition + 1).asReversed()) {
+            removeQueueItem(queueId, item.queueItemId)
+        }
     }
 
     fun clearQueue(queueId: String) {
@@ -603,6 +622,8 @@ internal class MusicAssistantClient(
             canGroupWith = json.stringList("can_group_with").toSet(),
             queueItemCount = queueItems,
             queueCurrentIndex = queueIndex,
+            queueCurrentItemId = queueCurrent?.optString("queue_item_id")?.takeIf { it.isNotBlank() }
+                ?: playerCurrent?.optString("queue_item_id")?.takeIf { it.isNotBlank() },
             queueResumePosition = resumePos,
             queueElapsedTime = elapsedTime,
             queueDuration = duration,
