@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.VesperServiceConfig
@@ -2119,6 +2120,53 @@ private fun VesperNowPlaying(
             val roomLabel = if (roomCount > 1) "$roomCount rooms" else player.name
 
             if (queueOpen) {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF151420))
+                            .clickable { queueOpen = false }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(Color(0xFF292039)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (!player.currentImageUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    modifier = Modifier.fillMaxSize(),
+                                    url = player.currentImageUrl,
+                                    scaleType = ImageView.ScaleType.CENTER_CROP,
+                                )
+                            } else {
+                                BasicText("♫", style = TextStyle(color = Color(0xFFA98CFF), fontSize = 24.sp))
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            BasicText(
+                                player.currentTitle ?: "Now Playing",
+                                style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                            )
+                            BasicText(
+                                player.currentArtist ?: roomLabel,
+                                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp),
+                                maxLines = 1,
+                            )
+                        }
+                        BasicText(
+                            "⌄",
+                            style = TextStyle(color = Color(0xFFC6ABFF), fontSize = 27.sp),
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Box(Modifier.weight(1f)) {
                 MusicQueueView(
                     player = player,
                     onBack = { queueOpen = false },
@@ -2130,10 +2178,29 @@ private fun VesperNowPlaying(
                         queueOpen = false
                     },
                 )
+                    }
+                }
             } else {
                 Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .pointerInput(player.queueId) {
+                        var verticalDrag = 0f
+                        val threshold = 65.dp.toPx()
+                        detectVerticalDragGestures(
+                            onDragStart = { verticalDrag = 0f },
+                            onVerticalDrag = { change, amount ->
+                                verticalDrag += amount
+                                if (verticalDrag < -threshold) {
+                                    queueOpen = true
+                                    verticalDrag = 0f
+                                    change.consume()
+                                }
+                            },
+                            onDragEnd = { verticalDrag = 0f },
+                            onDragCancel = { verticalDrag = 0f },
+                        )
+                    }
                     .pointerInput(queueIds, currentIndex) {
                         var dragDistance = 0f
                         val threshold = 64.dp.toPx()
@@ -2387,7 +2454,7 @@ private fun VesperNowPlaying(
                         contentAlignment = Alignment.Center,
                     ) {
                         BasicText(
-                            "Up Next",
+                            "⌃  Up Next",
                             style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
                         )
                     }
