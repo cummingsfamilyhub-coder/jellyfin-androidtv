@@ -1103,7 +1103,7 @@ class MobileMainActivity : FragmentActivity() {
         return try {
             withContext(Dispatchers.IO) {
                 MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken)
-                    .clearQueue(player.queueId)
+                    .clearUpcoming(player.queueId, player.queueCurrentItemId.orEmpty(), player.queueCurrentIndex)
             }
             true
         } catch (error: Exception) {
@@ -2387,7 +2387,7 @@ private fun VesperNowPlaying(
                         contentAlignment = Alignment.Center,
                     ) {
                         BasicText(
-                            "Queue",
+                            "Up Next",
                             style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold),
                         )
                     }
@@ -2453,16 +2453,19 @@ private fun MusicQueueView(
         loading = true
         error = null
         runCatching { onLoadQueue(player) }
-            .onSuccess { queue = it.sortedBy(MaQueueItem::index) }
+            .onSuccess { queue = it }
             .onFailure { error = it.message ?: "Couldn't load the queue." }
         loading = false
     }
 
-    LaunchedEffect(player.queueId, player.queueCurrentIndex, queue, loading) {
-        if (!loading && queue.isNotEmpty()) {
-            val playingIndex = queue.indexOfFirst { it.index >= 0 && it.index == player.queueCurrentIndex && it.name.equals(player.currentTitle, ignoreCase = true) }
-            if (playingIndex >= 0) queueListState.animateScrollToItem(playingIndex)
-        }
+    val currentPosition = queue.indexOfFirst { it.queueItemId == player.queueCurrentItemId }
+        .takeIf { it >= 0 }
+        ?: player.queueCurrentIndex?.takeIf { it in queue.indices }
+        ?: -1
+    val upcoming = if (currentPosition >= 0) queue.drop(currentPosition) else emptyList()
+
+    LaunchedEffect(player.queueId, loading) {
+        if (!loading) queueListState.scrollToItem(0)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -2492,13 +2495,13 @@ private fun MusicQueueView(
                 )
             }
             BasicText(
-                if (queue.isEmpty()) "" else "${queue.size} tracks",
+                if (queue.isEmpty()) "" else "${upcoming.size} upcoming",
                 style = TextStyle(color = Color(0xFF8F98A5), fontSize = 11.sp),
             )
             Spacer(Modifier.width(12.dp))
             BasicText(
-                "Clear",
-                modifier = Modifier.clickable(enabled = queue.isNotEmpty() && editingId == null) {
+                "Clear Upcoming",
+                modifier = Modifier.clickable(enabled = upcoming.size > 1 && editingId == null && currentPosition >= 0) {
                     confirmClear = true
                 }.padding(8.dp),
                 style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 12.sp),
@@ -2510,7 +2513,7 @@ private fun MusicQueueView(
         if (confirmClear) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 BasicText(
-                    "Clear the entire queue, including the current track?",
+                    "Remove upcoming songs? The current song keeps playing.",
                     modifier = Modifier.weight(1f),
                     style = TextStyle(color = Color.White, fontSize = 12.sp),
                 )
@@ -2521,7 +2524,7 @@ private fun MusicQueueView(
                     scope.launch {
                         editingId = "clear"
                         try {
-                            if (onClearQueue(player)) queue = emptyList()
+                            if (onClearQueue(player)) queue = queue.take(currentPosition + 1)
                         } finally {
                             editingId = null
                         }
@@ -2539,7 +2542,7 @@ private fun MusicQueueView(
                     pendingRemove = null
                     scope.launch {
                         editingId = item.queueItemId
-                        if (onEditQueue(item, null, true)) queue = onLoadQueue(player).sortedBy(MaQueueItem::index)
+                        if (onEditQueue(item, null, true)) queue = queue.filterNot { it.queueItemId == item.queueItemId }
                         editingId = null
                     }
                 }.padding(8.dp), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 12.sp))
@@ -2560,9 +2563,9 @@ private fun MusicQueueView(
                     style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 13.sp),
                 )
             }
-            queue.isEmpty() -> {
+            upcoming.isEmpty() -> {
                 BasicText(
-                    "Nothing else is queued.",
+                    "Current track unavailable. Refresh the player to show Up Next.",
                     style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
                 )
             }
@@ -2573,10 +2576,9 @@ private fun MusicQueueView(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    items(queue, key = { it.queueItemId }) { item ->
-                        val current = item.index >= 0 && player.queueCurrentIndex == item.index &&
-                            item.name.equals(player.currentTitle, ignoreCase = true)
-                        val played = item.index >= 0 && player.queueCurrentIndex?.let { item.index < it } == true
+                    items(upcoming, key = { it.queueItemId }) { item ->
+                        val current = item.queueItemId == upcoming.firstOrNull()?.queueItemId
+                        val played = false
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2650,7 +2652,7 @@ private fun MusicQueueView(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     listOf(-1 to "↑", 1 to "↓").forEach { (shift, arrow) ->
                                         val enabled = editingId == null &&
-                                            (if (shift < 0) item != queue.first() else item != queue.last())
+                                            (if (shift < 0) item != upcoming.first() else item != upcoming.last())
                                         Box(
                                             modifier = Modifier
                                                 .size(40.dp)
@@ -2667,7 +2669,7 @@ private fun MusicQueueView(
                                                                 reordered.removeAt(oldIndex)
                                                                 reordered.add(newIndex, item)
                                                                 queue = reordered
-                                                                // Avoid reloading all 500 items on every tap.
+                                                                // Avoid reloading the entire queue on every tap.
                                                                 // The server is authoritative; reload on the next queue opening.
                                                             }
                                                         } finally {
