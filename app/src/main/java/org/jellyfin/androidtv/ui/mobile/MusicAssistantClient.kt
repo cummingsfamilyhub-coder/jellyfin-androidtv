@@ -198,6 +198,24 @@ internal class MusicAssistantClient(
         )
     }
 
+    fun moveQueueItem(queueId: String, queueItemId: String, shift: Int) {
+        require(shift != 0)
+        command(
+            "player_queues/move_item",
+            JSONObject().put("queue_id", queueId)
+                .put("queue_item_id", queueItemId)
+                .put("pos_shift", shift)
+        )
+    }
+
+    fun removeQueueItem(queueId: String, queueItemId: String) {
+        command(
+            "player_queues/delete_item",
+            JSONObject().put("queue_id", queueId)
+                .put("queue_item_id", queueItemId)
+        )
+    }
+
     fun loadPlayers(): List<MaPlayer> {
         val queues = commandArray("player_queues/all", JSONObject())
             .associateBy { it.optString("queue_id") }
@@ -478,7 +496,7 @@ internal class MusicAssistantClient(
         return MaQueueItem(
             queueItemId = queueItemId,
             queueId = queueId,
-            index = json.optInt("index", 0),
+            index = if (json.has("index") && !json.isNull("index")) json.optInt("index") else -1,
             name = displayName,
             artist = artists.takeIf { it.isNotBlank() },
             imageUrl = image,
