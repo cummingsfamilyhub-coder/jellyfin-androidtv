@@ -9,6 +9,13 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -2117,27 +2124,27 @@ private fun VesperNowPlaying(
             }.coerceAtLeast(1)
             val roomLabel = if (roomCount > 1) "$roomCount rooms" else player.name
 
-            if (queueOpen) {
+            AnimatedContent(
+                targetState = queueOpen,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    if (targetState) {
+                        (slideInVertically(animationSpec = tween(260), initialOffsetY = { it }) +
+                            fadeIn(animationSpec = tween(180)))
+                            .togetherWith(slideOutVertically(animationSpec = tween(260), targetOffsetY = { -it / 3 }) +
+                                fadeOut(animationSpec = tween(160)))
+                    } else {
+                        (slideInVertically(animationSpec = tween(260), initialOffsetY = { -it / 3 }) +
+                            fadeIn(animationSpec = tween(180)))
+                            .togetherWith(slideOutVertically(animationSpec = tween(260), targetOffsetY = { it }) +
+                                fadeOut(animationSpec = tween(160)))
+                    }
+                },
+                label = "Now Playing Up Next transition",
+            ) { showQueue ->
+            if (showQueue) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(player.queueId) {
-                            var dragDistance = 0f
-                            val threshold = 65.dp.toPx()
-                            detectVerticalDragGestures(
-                                onDragStart = { dragDistance = 0f },
-                                onVerticalDrag = { change, amount ->
-                                    dragDistance += amount
-                                    if (dragDistance > threshold) {
-                                        queueOpen = false
-                                        dragDistance = 0f
-                                        change.consume()
-                                    }
-                                },
-                                onDragEnd = { dragDistance = 0f },
-                                onDragCancel = { dragDistance = 0f },
-                            )
-                        },
+                    modifier = Modifier.fillMaxSize(),
                 ) {
                     Row(
                         modifier = Modifier
@@ -2145,6 +2152,22 @@ private fun VesperNowPlaying(
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0xFF151420))
                             .clickable { queueOpen = false }
+                            .pointerInput(player.queueId) {
+                                var dragDistance = 0f
+                                val threshold = 65.dp.toPx()
+                                detectVerticalDragGestures(
+                                    onDragStart = { dragDistance = 0f },
+                                    onVerticalDrag = { change, amount ->
+                                        dragDistance += amount
+                                        if (dragDistance > threshold) {
+                                            queueOpen = false
+                                            change.consume()
+                                        }
+                                    },
+                                    onDragEnd = { dragDistance = 0f },
+                                    onDragCancel = { dragDistance = 0f },
+                                )
+                            }
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -2511,6 +2534,7 @@ private fun VesperNowPlaying(
                         }
                     }
                 }
+            }
             }
             }
         }

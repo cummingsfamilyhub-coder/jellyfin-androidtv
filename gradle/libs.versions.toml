@@ -64,6 +64,7 @@ androidx-activity = { module = "androidx.activity:activity", version.ref = "andr
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "androidx-appcompat" }
 androidx-cardview = { module = "androidx.cardview:cardview", version.ref = "androidx-cardview" }
+androidx-compose-animation = { module = "androidx.compose.animation:animation", version.ref = "androidx-compose-foundation" }
 androidx-compose-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "androidx-compose-foundation" }
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "androidx-compose-ui" }
 androidx-constraintlayout = { module = "androidx.constraintlayout:constraintlayout", version.ref = "androidx-constraintlayout" }
@@ -135,6 +136,7 @@ acra = [
     "acra-toast",
 ]
 androidx-compose = [
+    "androidx-compose-animation",
     "androidx-compose-foundation",
     "androidx-compose-ui-tooling",
 ]
