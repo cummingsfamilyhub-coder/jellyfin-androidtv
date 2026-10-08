@@ -2711,24 +2711,35 @@ private fun MusicQueueView(
                                         style = TextStyle(color = Color(0xFFAA9DBD), fontSize = 20.sp),
                                     )
                                     if (queueActionsItemId == item.queueItemId) {
-                                        androidx.compose.material3.DropdownMenu(
-                                            expanded = true,
+                                        Popup(
+                                            alignment = Alignment.TopEnd,
                                             onDismissRequest = { queueActionsItemId = null },
+                                            properties = PopupProperties(focusable = true),
                                         ) {
-                                            androidx.compose.material3.DropdownMenuItem(
-                                                text = { BasicText("Play now", style = TextStyle(color = Color.White)) },
-                                                onClick = {
-                                                    queueActionsItemId = null
-                                                    onPlayQueueItem(item)
-                                                },
-                                            )
-                                            androidx.compose.material3.DropdownMenuItem(
-                                                text = { BasicText("Remove from queue", style = TextStyle(color = Color.White)) },
-                                                onClick = {
-                                                    queueActionsItemId = null
-                                                    pendingRemove = item
-                                                },
-                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .width(190.dp)
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .background(Color(0xFF252034))
+                                                    .padding(8.dp),
+                                            ) {
+                                                BasicText(
+                                                    "Play now",
+                                                    modifier = Modifier.fillMaxWidth().clickable {
+                                                        queueActionsItemId = null
+                                                        onPlayQueueItem(item)
+                                                    }.padding(12.dp),
+                                                    style = TextStyle(color = Color.White, fontSize = 14.sp),
+                                                )
+                                                BasicText(
+                                                    "Remove from queue",
+                                                    modifier = Modifier.fillMaxWidth().clickable {
+                                                        queueActionsItemId = null
+                                                        pendingRemove = item
+                                                    }.padding(12.dp),
+                                                    style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 14.sp),
+                                                )
+                                            }
                                         }
                                     }
                                 }
