@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
@@ -245,6 +246,7 @@ class MobileMainActivity : FragmentActivity() {
                     if (tab == MobileTab.BOOKS) loadBooks()
                 },
                 onRetryMusic = ::loadMusic,
+                onLoadArtistAlbums = ::loadMusicArtistAlbums,
                 onPlayMusic = ::playMusic,
                 onControlMusic = ::controlMusic,
                 onSeekMusic = ::seekMusic,
@@ -947,6 +949,14 @@ class MobileMainActivity : FragmentActivity() {
             friendlyServiceError("Books", error)
         }
     }
+
+    private suspend fun loadMusicArtistAlbums(artist: MaMediaItem): List<MaMediaItem> =
+        withContext(Dispatchers.IO) {
+            MusicAssistantClient(
+                baseUrl = musicAssistantBaseUrl,
+                token = musicAssistantToken,
+            ).loadArtistAlbums(artist)
+        }
 
     private fun loadMusic() {
         if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) {
@@ -1680,6 +1690,7 @@ private fun VesperMobile(
     onSwitchProfile: () -> Unit,
     onTabSelected: (MobileTab) -> Unit,
     onRetryMusic: () -> Unit,
+    onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
     onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControlMusic: (MaPlayer, MusicPlayerAction) -> Unit,
     onSeekMusic: (MaPlayer, Int) -> Unit,
@@ -1771,6 +1782,7 @@ private fun VesperMobile(
                     userName = userName,
                     userAvatarUrl = userAvatarUrl,
                     onRetry = onRetryMusic,
+                    onLoadArtistAlbums = onLoadArtistAlbums,
                     onPlay = onPlayMusic,
                     onControl = onControlMusic,
                     onUpdateGroup = onUpdateMusicGroup,
@@ -3074,6 +3086,7 @@ private fun MusicHub(
     userName: String,
     userAvatarUrl: String?,
     onRetry: () -> Unit,
+    onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
     onPlay: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onUpdateGroup: (MaPlayer, Set<String>) -> Unit,
@@ -3082,9 +3095,27 @@ private fun MusicHub(
     onSettings: () -> Unit,
 ) {
     var pendingItem by remember { mutableStateOf<MaMediaItem?>(null) }
+    var selectedArtist by remember { mutableStateOf<MaMediaItem?>(null) }
+    val musicListState = rememberLazyListState()
+
+    BackHandler(enabled = selectedArtist != null) {
+        if (pendingItem != null) pendingItem = null else selectedArtist = null
+    }
 
     Box(Modifier.fillMaxSize()) {
+        val artist = selectedArtist
+        if (artist != null) {
+            MusicArtistDetail(
+                artist = artist,
+                onBack = { selectedArtist = null },
+                onLoadAlbums = onLoadArtistAlbums,
+                onAlbumSelected = { album ->
+                    if (album.playable) pendingItem = album
+                },
+            )
+        } else {
         LazyColumn(
+            state = musicListState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
         ) {
@@ -3153,9 +3184,7 @@ private fun MusicHub(
                         MaMediaRow(
                             title = "Artists",
                             items = snapshot.artists,
-                            onClick = { item ->
-                                if (item.playable) pendingItem = item
-                            },
+                            onClick = { artistItem -> selectedArtist = artistItem },
                             artistStyle = true,
                         )
                     }
@@ -3189,6 +3218,7 @@ private fun MusicHub(
                 }
             }
         }
+        }
 
         pendingItem?.let { item ->
             MusicRoomPicker(
@@ -3202,6 +3232,120 @@ private fun MusicHub(
             )
         }
 
+    }
+}
+
+
+@Composable
+private fun MusicArtistDetail(
+    artist: MaMediaItem,
+    onBack: () -> Unit,
+    onLoadAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
+    onAlbumSelected: (MaMediaItem) -> Unit,
+) {
+    var albums by remember(artist.uri) { mutableStateOf<List<MaMediaItem>>(emptyList()) }
+    var loading by remember(artist.uri) { mutableStateOf(true) }
+    var error by remember(artist.uri) { mutableStateOf<String?>(null) }
+    var retry by remember(artist.uri) { mutableStateOf(0) }
+
+    LaunchedEffect(artist.uri, retry) {
+        loading = true
+        error = null
+        try {
+            albums = onLoadAlbums(artist)
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            error = failure.message ?: "Couldn't load this artist's albums."
+        } finally {
+            loading = false
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(21.dp))
+                        .background(Color(0x22FFFFFF))
+                        .clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText("‹", style = TextStyle(color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold))
+                }
+                Spacer(Modifier.width(14.dp))
+                BasicText("Artists", style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 15.sp))
+            }
+        }
+        item {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(184.dp)
+                        .clip(RoundedCornerShape(92.dp))
+                        .background(Color(0xFF151A2A))
+                        .border(1.dp, Color(0x665B47D8), RoundedCornerShape(92.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!artist.imageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            modifier = Modifier.fillMaxSize(),
+                            url = artist.imageUrl,
+                            scaleType = ImageView.ScaleType.CENTER_CROP,
+                        )
+                    } else {
+                        BasicText(
+                            artist.name.take(1).uppercase(),
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 64.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                BasicText(
+                    artist.name,
+                    style = TextStyle(color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 2,
+                )
+                Spacer(Modifier.height(5.dp))
+                BasicText("ARTIST", style = TextStyle(color = Color(0xFFA98CFF), fontSize = 10.sp, fontWeight = FontWeight.Bold))
+            }
+        }
+        item {
+            when {
+                loading -> BasicText(
+                    "Loading albums…",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
+                )
+                error != null -> Column(Modifier.padding(horizontal = 20.dp, vertical = 20.dp)) {
+                    BasicText(error.orEmpty(), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 13.sp))
+                    Spacer(Modifier.height(10.dp))
+                    DarkButton("Try again") { retry += 1 }
+                }
+                albums.isEmpty() -> BasicText(
+                    "No albums found for this artist.",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
+                )
+                else -> MaMediaRow(
+                    title = "Albums",
+                    items = albums,
+                    onClick = onAlbumSelected,
+                )
+            }
+        }
     }
 }
 

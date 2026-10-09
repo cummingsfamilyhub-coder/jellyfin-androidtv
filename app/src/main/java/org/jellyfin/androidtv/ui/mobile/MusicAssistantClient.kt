@@ -151,6 +151,18 @@ internal class MusicAssistantClient(
         )
     }
 
+    fun loadArtistAlbums(artist: MaMediaItem): List<MaMediaItem> {
+        require(artist.mediaType == "artist" && artist.itemId.isNotBlank()) {
+            "Artist details are unavailable."
+        }
+        return commandArray(
+            "music/artists/artist_albums",
+            JSONObject()
+                .put("item_id", artist.itemId)
+                .put("provider_instance_id_or_domain", artist.provider),
+        ).mapNotNull(::parseMediaItem)
+    }
+
     fun searchLibrary(query: String, limit: Int = 12): MaSearchResults {
         val clean = query.trim()
         if (clean.isBlank()) return MaSearchResults()
