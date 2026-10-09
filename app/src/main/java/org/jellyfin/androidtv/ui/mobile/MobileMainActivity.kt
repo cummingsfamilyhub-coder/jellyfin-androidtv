@@ -3098,7 +3098,7 @@ private fun MusicHub(
     var selectedArtist by remember { mutableStateOf<MaMediaItem?>(null) }
     val musicListState = rememberLazyListState()
 
-    BackHandler(enabled = selectedArtist != null) {
+    BackHandler(enabled = selectedArtist != null || pendingItem != null) {
         if (pendingItem != null) pendingItem = null else selectedArtist = null
     }
 
