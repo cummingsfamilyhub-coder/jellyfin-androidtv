@@ -169,6 +169,37 @@ internal class MusicAssistantClient(
         )
     }
 
+
+    /** Full category pages are paginated; home snapshot only shows first few items. */
+    fun loadCategoryItems(category: String): List<MaMediaItem> {
+        val path = when (category) {
+            "Artists" -> "music/artists/library_items"
+            "Playlists" -> "music/playlists/library_items"
+            "Radio" -> "music/radios/library_items"
+            "Recently Played" -> "music/recently_played_items"
+            else -> throw IllegalArgumentException("Unsupported music category.")
+        }
+        if (category == "Recently Played") {
+            return commandArray(path, JSONObject()
+                .put("limit", 200)
+                .put("media_types", JSONArray(listOf("track", "album", "playlist", "radio"))))
+                .mapNotNull(::parseMediaItem).distinctBy { it.uri }
+        }
+
+        val results = mutableListOf<MaMediaItem>()
+        val pageSize = 100
+        for (page in 0 until 10) {
+            val args = JSONObject()
+                .put("limit", pageSize).put("offset", page * pageSize)
+                .put("order_by", "name")
+            if (category == "Artists") args.put("album_artists_only", true)
+            val batch = commandArray(path, args)
+            results += batch.mapNotNull(::parseMediaItem)
+            if (batch.size < pageSize) break
+        }
+        return results.distinctBy { it.uri }
+    }
+
     fun loadArtistAlbums(artist: MaMediaItem): List<MaMediaItem> {
         require(artist.mediaType == "artist" && artist.itemId.isNotBlank()) {
             "Artist details are unavailable."
