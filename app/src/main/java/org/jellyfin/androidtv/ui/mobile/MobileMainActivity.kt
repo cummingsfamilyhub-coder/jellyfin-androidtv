@@ -1889,7 +1889,7 @@ private fun VesperMobile(
                     userAvatarUrl = userAvatarUrl,
                     onRetry = onRetryMusic,
                     onLoadArtistAlbums = onLoadArtistAlbums,
-                    onLoadCategory = onLoadMusicCategoryItems,
+                    onLoadCategory = ::loadMusicCategoryItems,
                     onLoadAlbumDetails = onLoadAlbumDetails,
                     onSearchMusicLibrary = onMusicLibrarySearch,
                     onOpenMyV = { openTab(MobileTab.MYV) },
