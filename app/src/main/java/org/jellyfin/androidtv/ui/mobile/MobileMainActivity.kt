@@ -3352,20 +3352,16 @@ private fun MusicHub(
                     }
 
                     item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            BasicText("MyV · Music",
-                                modifier = Modifier.weight(1f).clickable(onClick = onOpenMyV)
-                                    .padding(vertical = 8.dp),
-                                style = TextStyle(color = Color.White,
-                                    fontSize = 17.sp, fontWeight = FontWeight.Bold))
-                            DarkButton("View MyV") { onOpenMyV() }
-                            Spacer(Modifier.width(8.dp))
-                            DarkButton("Find songs") { favoriteSearchOpen = true }
-                        }
+                        MaMediaRow(
+                            title = "MyV · Favourite Tracks",
+                            items = musicFavourites,
+                            onClick = { track -> if (track.playable) pendingItem = track },
+                            favoriteUris = musicFavourites.map { it.uri }.toSet(),
+                            onToggleFavorite = onToggleMusicFavourite,
+                            onViewAll = onOpenMyV,
+                            actionLabel = "+ Save",
+                            onAction = { favoriteSearchOpen = true },
+                        )
                     }
 
                     if (snapshot.recentlyPlayed.isNotEmpty()) item {
@@ -3375,17 +3371,6 @@ private fun MusicHub(
                             onClick = openMusicItem,
                             favoriteUris = musicFavourites.map { it.uri }.toSet(),
                             onToggleFavorite = onToggleMusicFavourite,
-                        )
-                    }
-
-                    if (musicFavourites.isNotEmpty()) item {
-                        MaMediaRow(
-                            title = "Favourite Tracks · MyV",
-                            items = musicFavourites,
-                            onClick = { track -> if (track.playable) pendingItem = track },
-                            favoriteUris = musicFavourites.map { it.uri }.toSet(),
-                            onToggleFavorite = onToggleMusicFavourite,
-                            onViewAll = onOpenMyV,
                         )
                     }
 
@@ -4724,15 +4709,33 @@ private fun MaMediaRow(
     favoriteUris: Set<String> = emptySet(),
     onToggleFavorite: ((MaMediaItem) -> Unit)? = null,
     onViewAll: (() -> Unit)? = null,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     Column(Modifier.padding(top = 10.dp)) {
-        BasicText(
-            "$title  ›",
-            style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
-            modifier = Modifier
-                .then(if (onViewAll != null) Modifier.clickable(onClick = onViewAll) else Modifier)
-                .padding(horizontal = 20.dp, vertical = 7.dp),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .padding(start = 20.dp, end = 18.dp, top = 6.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText(
+                "$title  ›",
+                style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                modifier = Modifier.weight(1f)
+                    .then(if (onViewAll != null) Modifier.clickable(onClick = onViewAll) else Modifier)
+                    .padding(vertical = 5.dp),
+            )
+            if (actionLabel != null && onAction != null) {
+                DarkButton(actionLabel, onAction)
+            }
+        }
+        if (items.isEmpty() && onAction != null) {
+            BasicText(
+                "Save a song to start your MyV collection.",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
+                style = TextStyle(color = Color(0xFF8F9BA9), fontSize = 13.sp),
+            )
+        }
 
         LazyRow(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
@@ -10080,6 +10083,7 @@ private fun MyVBrowser(
 ) {
     var pendingTrack by remember { mutableStateOf<MaMediaItem?>(null) }
     var selectedMusicGenre by remember { mutableStateOf<String?>(null) }
+    var musicSort by remember { mutableStateOf("Recently Saved") }
     var fetchedGenres by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
 
     // Existing bookmarks predate stored genre tags. Enrich the screen without
@@ -10110,6 +10114,12 @@ private fun MyVBrowser(
         else -> tracks.filter { item ->
             genresOf(item).any { it.equals(genre, ignoreCase = true) }
         }
+    }
+    val sortedTracks = when (musicSort) {
+        "A–Z" -> filteredTracks.sortedBy { it.name.lowercase() }
+        "Artist" -> filteredTracks.sortedWith(
+            compareBy<MaMediaItem> { it.subtitle.lowercase() }.thenBy { it.name.lowercase() })
+        else -> filteredTracks // Stored newest first.
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -10145,102 +10155,74 @@ private fun MyVBrowser(
                     showVideoTypeFilter = true,
                 )
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 160.dp),
-                ) {
-                    item {
+                Column(Modifier.fillMaxSize().padding(top = 18.dp)) {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                        BasicText("MyV · Music",
+                            style = TextStyle(color = Color.White, fontSize = 32.sp,
+                                fontWeight = FontWeight.Bold))
                         BasicText(
-                            "MyV · Music",
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 17.dp),
-                            style = TextStyle(color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold),
-                        )
+                            if (selectedMusicGenre == null) "${tracks.size} items"
+                            else "${filteredTracks.size} • $selectedMusicGenre",
+                            style = TextStyle(color = Color(0xFF81909E), fontSize = 13.sp))
                     }
-                    if (tracks.isNotEmpty()) {
-                        item {
-                            LazyRow(
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                item {
-                                    GenreChip(label = "All", selected = selectedMusicGenre == null) {
-                                        selectedMusicGenre = null
-                                    }
+                    LazyRow(
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(listOf("Recently Saved", "A–Z", "Artist")) { option ->
+                            SortChip(option, musicSort == option) { musicSort = option }
+                        }
+                    }
+                    Spacer(Modifier.height(11.dp))
+                    if (musicGenres.isNotEmpty()) {
+                        LazyRow(
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            item {
+                                GenreChip("All", selectedMusicGenre == null) {
+                                    selectedMusicGenre = null
                                 }
-                                items(musicGenres, key = { it }) { genre ->
-                                    GenreChip(
-                                        label = genre,
-                                        selected = selectedMusicGenre == genre,
-                                    ) { selectedMusicGenre = if (selectedMusicGenre == genre) null else genre }
+                            }
+                            items(musicGenres, key = { it }) { genre ->
+                                GenreChip(genre, selectedMusicGenre == genre) {
+                                    selectedMusicGenre = if (selectedMusicGenre == genre) null else genre
                                 }
-                                if (hasUncategorised) item {
-                                    GenreChip(
-                                        label = "Uncategorised",
-                                        selected = selectedMusicGenre == "Uncategorised",
-                                    ) {
-                                        selectedMusicGenre = if (selectedMusicGenre == "Uncategorised") null
-                                            else "Uncategorised"
-                                    }
+                            }
+                            if (hasUncategorised) item {
+                                GenreChip("Uncategorised", selectedMusicGenre == "Uncategorised") {
+                                    selectedMusicGenre =
+                                        if (selectedMusicGenre == "Uncategorised") null else "Uncategorised"
                                 }
                             }
                         }
-                        item {
-                            BasicText(
-                                if (selectedMusicGenre == null) "${tracks.size} saved tracks"
-                                else "${filteredTracks.size} tracks · ${selectedMusicGenre}",
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
-                                style = TextStyle(color = Color(0xFF8794A4), fontSize = 12.sp),
-                            )
-                        }
+                        Spacer(Modifier.height(12.dp))
+                    } else if (tracks.isNotEmpty()) {
+                        BasicText("Genre filters will appear when music metadata is available.",
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                            style = TextStyle(color = Color(0xFF768391), fontSize = 11.sp))
+                        Spacer(Modifier.height(7.dp))
                     }
-                    if (tracks.isEmpty()) {
-                        item {
-                            BasicText(
-                                "No favourite songs yet. Tap V+ beside a song to save it here.",
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
-                            )
-                        }
-                    } else if (filteredTracks.isEmpty()) {
-                        item {
-                            BasicText(
-                                "No favourite tracks in this genre.",
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
-                            )
-                        }
+                    if (sortedTracks.isEmpty()) {
+                        BasicText(
+                            if (tracks.isEmpty())
+                                "No favourite songs yet. Tap V+ beside a song to save it here."
+                            else "No favourite tracks in this genre.",
+                            modifier = Modifier.padding(20.dp),
+                            style = TextStyle(color = Color(0xFF95A2AF), fontSize = 15.sp))
                     } else {
-                        items(filteredTracks, key = { it.uri }) { track ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth()
-                                    .clickable { pendingTrack = track }
-                                    .padding(horizontal = 20.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Box(
-                                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(11.dp))
-                                        .background(Color(0xFF191A28)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (!track.imageUrl.isNullOrBlank()) {
-                                        AsyncImage(modifier = Modifier.fillMaxSize(), url = track.imageUrl,
-                                            scaleType = ImageView.ScaleType.CENTER_CROP)
-                                    } else {
-                                        BasicText("♫", style = TextStyle(
-                                            color = Color(0xFFA98CFF), fontSize = 22.sp))
-                                    }
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    BasicText(track.name, maxLines = 1,
-                                        style = TextStyle(color = Color.White, fontSize = 14.sp,
-                                            fontWeight = FontWeight.SemiBold))
-                                    BasicText(track.subtitle, maxLines = 1,
-                                        style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 11.sp))
-                                }
-                                MyVMark(favorite = true,
-                                    modifier = Modifier.clickable { onToggleMusic(track) }
-                                        .padding(horizontal = 8.dp, vertical = 8.dp))
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(if (expanded) 5 else 3),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                start = 16.dp, end = 16.dp, top = 8.dp, bottom = 160.dp),
+                            horizontalArrangement = Arrangement.spacedBy(11.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            gridItems(sortedTracks, key = { it.uri }) { track ->
+                                MyVMusicCard(item = track,
+                                    onPlay = { pendingTrack = track },
+                                    onRemove = { onToggleMusic(track) })
                             }
                         }
                     }
@@ -10257,6 +10239,50 @@ private fun MyVBrowser(
                     },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MyVMusicCard(
+    item: MaMediaItem,
+    onPlay: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onPlay)) {
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF111A23)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!item.imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    modifier = Modifier.fillMaxSize(), url = item.imageUrl,
+                    scaleType = ImageView.ScaleType.CENTER_CROP)
+            } else {
+                BasicText("♫", style = TextStyle(color = Color(0xFFA98CFF),
+                    fontSize = 32.sp, fontWeight = FontWeight.Bold))
+            }
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xDD11131D))
+                    .clickable(onClick = onRemove)
+                    .padding(5.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                MyVMark(favorite = true)
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        BasicText(item.name,
+            style = TextStyle(color = Color.White, fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold), maxLines = 2)
+        if (item.subtitle.isNotBlank()) {
+            BasicText(item.subtitle,
+                style = TextStyle(color = Color(0xFF7F8D9A), fontSize = 11.sp),
+                maxLines = 1)
         }
     }
 }
