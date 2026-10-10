@@ -638,6 +638,13 @@ class MobileMainActivity : FragmentActivity() {
             val favorite = item.userData?.isFavorite == true
             val data = runCatching {
                 itemMutationRepository.setFavorite(item.id, !favorite)
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@MobileMainActivity,
+                    "Couldn't update MyV. Check Jellyfin is accessible, then try again.",
+                    Toast.LENGTH_LONG,
+                ).show()
+                android.util.Log.w("VesperMyV", "Jellyfin favourite update failed", error)
             }.getOrNull() ?: return@launch
 
             fun updated(list: List<BaseItemDto>) = list.map { existing ->
@@ -658,6 +665,11 @@ class MobileMainActivity : FragmentActivity() {
                 collections = updated(state.collections),
             )
             if (selected?.id == item.id) selected = updatedItem
+            Toast.makeText(
+                this@MobileMainActivity,
+                if (data.isFavorite == true) "Added to MyV" else "Removed from MyV",
+                Toast.LENGTH_SHORT,
+            ).show()
         }
     }
 
@@ -8123,8 +8135,9 @@ private fun VesperHero(
                 VesperButton(
                     if ((item.userData?.playbackPositionTicks ?: 0L) > 0L) "▶ Resume" else "▶ Play",
                     { onPlay(item) },
+                    Modifier.height(47.dp),
                 )
-                DarkButton("More Info", onInfo)
+                DarkButton("More Info", onInfo, Modifier.height(47.dp))
                 FavoriteButton(
                     favorite = item.userData?.isFavorite == true,
                     onClick = onToggleFavorite,
@@ -10768,9 +10781,10 @@ private fun FavoriteButton(
 private fun DarkButton(
     label: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xAA111820))
             .clickable(onClick = onClick)
