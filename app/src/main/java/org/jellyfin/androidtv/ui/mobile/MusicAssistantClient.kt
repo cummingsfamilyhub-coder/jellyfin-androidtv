@@ -200,7 +200,7 @@ internal class MusicAssistantClient(
         }.distinctBy { it.id }.sortedBy { it.name.lowercase() }
     }
 
-    fun loadCategoryItems(category: String, genreId: Int? = null): List<MaMediaItem> {
+    fun loadCategoryItems(category: String, genreIds: List<Int>? = null): List<MaMediaItem> {
         val path = when (category) {
             "Artists" -> "music/artists/library_items"
             "Playlists" -> "music/playlists/library_items"
@@ -222,8 +222,10 @@ internal class MusicAssistantClient(
                 .put("limit", pageSize).put("offset", page * pageSize)
                 .put("order_by", "name")
             if (category == "Artists") args.put("album_artists_only", true)
-            if (genreId != null && category in setOf("Artists", "Playlists", "Radio")) {
-                args.put("genre", genreId)
+            if (!genreIds.isNullOrEmpty() && category in setOf("Artists", "Playlists", "Radio")) {
+                // Music Assistant supports a single genre ID or an array of IDs.
+                // Grouped genres are a union across its real indexed subgenres.
+                args.put("genre", if (genreIds.size == 1) genreIds.first() else JSONArray(genreIds))
             }
             val batch = commandArray(path, args)
             results += batch.mapNotNull(::parseMediaItem)
