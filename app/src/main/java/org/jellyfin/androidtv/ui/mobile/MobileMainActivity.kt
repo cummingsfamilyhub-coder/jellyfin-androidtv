@@ -7962,6 +7962,7 @@ private fun VesperHero(
                 FavoriteButton(
                     favorite = item.userData?.isFavorite == true,
                     onClick = onToggleFavorite,
+                    iconOnly = true,
                 )
             }
         }
@@ -10582,16 +10583,18 @@ private fun MyVMusicCard(
 private fun FavoriteButton(
     favorite: Boolean,
     onClick: () -> Unit,
+    iconOnly: Boolean = false,
 ) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xAA111820))
+            .background(Color(0xCC111820))
             .clickable(onClick = onClick)
-            .padding(horizontal = 15.dp, vertical = 11.dp),
+            .then(if (iconOnly) Modifier.size(47.dp)
+                else Modifier.padding(horizontal = 15.dp, vertical = 11.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        MyVMark(favorite = favorite, withLabel = true)
+        MyVMark(favorite = favorite, withLabel = !iconOnly)
     }
 }
 
