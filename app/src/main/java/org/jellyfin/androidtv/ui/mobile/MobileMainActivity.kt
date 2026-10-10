@@ -8137,7 +8137,7 @@ private fun VesperHero(
                     { onPlay(item) },
                     Modifier.height(47.dp),
                 )
-                DarkButton("More Info", onInfo, Modifier.height(47.dp))
+                HeroDarkButton("More Info", onInfo)
                 FavoriteButton(
                     favorite = item.userData?.isFavorite == true,
                     onClick = onToggleFavorite,
@@ -10781,10 +10781,9 @@ private fun FavoriteButton(
 private fun DarkButton(
     label: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = modifier
+        modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xAA111820))
             .clickable(onClick = onClick)
@@ -10793,6 +10792,28 @@ private fun DarkButton(
         BasicText(
             label,
             style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+        )
+    }
+}
+
+@Composable
+private fun HeroDarkButton(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(47.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xAA111820))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 17.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            label,
+            style = TextStyle(
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            ),
         )
     }
 }
