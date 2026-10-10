@@ -77,6 +77,8 @@ internal data class MaSearchResults(
         get() = artists + albums + tracks
 }
 
+internal data class MaGenre(val id: Int, val name: String)
+
 internal data class MaPlaylistTrack(val item: MaMediaItem, val position: Int)
 internal data class MaPlaylistDetails(val title: String, val editable: Boolean, val tracks: List<MaPlaylistTrack>)
 
@@ -171,7 +173,34 @@ internal class MusicAssistantClient(
 
 
     /** Full category pages are paginated; home snapshot only shows first few items. */
-    fun loadCategoryItems(category: String): List<MaMediaItem> {
+    /**
+     * Genres are queried from the Music Assistant library using stable IDs,
+     * rather than inferred from a truncated homepage carousel.
+     */
+    fun loadCategoryGenres(category: String): List<MaGenre> {
+        val mediaType = when (category) {
+            "Artists" -> "artist"
+            "Playlists" -> "playlist"
+            "Radio" -> "radio"
+            else -> return emptyList()
+        }
+        return commandArray(
+            "music/genres/library_items",
+            JSONObject()
+                .put("limit", 250)
+                .put("offset", 0)
+                .put("order_by", "name")
+                .put("hide_empty", true)
+                .put("media_type", mediaType)
+                .put("content_type", "music"),
+        ).mapNotNull { genre ->
+            val id = genre.optString("item_id").toIntOrNull() ?: return@mapNotNull null
+            val title = genre.optString("name").trim()
+            if (title.isEmpty()) null else MaGenre(id, title)
+        }.distinctBy { it.id }.sortedBy { it.name.lowercase() }
+    }
+
+    fun loadCategoryItems(category: String, genreId: Int? = null): List<MaMediaItem> {
         val path = when (category) {
             "Artists" -> "music/artists/library_items"
             "Playlists" -> "music/playlists/library_items"
@@ -193,6 +222,9 @@ internal class MusicAssistantClient(
                 .put("limit", pageSize).put("offset", page * pageSize)
                 .put("order_by", "name")
             if (category == "Artists") args.put("album_artists_only", true)
+            if (genreId != null && category in setOf("Artists", "Playlists", "Radio")) {
+                args.put("genre", genreId)
+            }
             val batch = commandArray(path, args)
             results += batch.mapNotNull(::parseMediaItem)
             if (batch.size < pageSize) break
