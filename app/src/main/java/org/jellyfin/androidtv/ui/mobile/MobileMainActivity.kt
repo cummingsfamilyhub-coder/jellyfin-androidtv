@@ -255,6 +255,7 @@ class MobileMainActivity : FragmentActivity() {
                 onRetryMusic = ::loadMusic,
                 onLoadArtistAlbums = ::loadMusicArtistAlbums,
                 onLoadMusicCategory = ::loadMusicCategoryItems,
+                onLoadMusicGenres = ::loadMusicCategoryGenres,
                 onLoadAlbumDetails = ::loadMusicAlbumDetails,
                 onLoadPlaylistDetails = ::loadMusicPlaylistDetails,
                 onCreateMusicPlaylist = ::createMusicPlaylist,
@@ -1006,9 +1007,18 @@ class MobileMainActivity : FragmentActivity() {
         }
     }
 
-    private suspend fun loadMusicCategoryItems(category: String): List<MaMediaItem> =
+    private suspend fun loadMusicCategoryItems(
+        category: String,
+        genreId: Int?,
+    ): List<MaMediaItem> = withContext(Dispatchers.IO) {
+        MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken)
+            .loadCategoryItems(category, genreId)
+    }
+
+    private suspend fun loadMusicCategoryGenres(category: String): List<MaGenre> =
         withContext(Dispatchers.IO) {
-            MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken).loadCategoryItems(category)
+            MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken)
+                .loadCategoryGenres(category)
         }
 
     private suspend fun loadMusicArtistAlbums(artist: MaMediaItem): List<MaMediaItem> =
@@ -1792,7 +1802,8 @@ private fun VesperMobile(
     onTabSelected: (MobileTab) -> Unit,
     onRetryMusic: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
-    onLoadMusicCategory: suspend (String) -> List<MaMediaItem>,
+    onLoadMusicCategory: suspend (String, Int?) -> List<MaMediaItem>,
+    onLoadMusicGenres: suspend (String) -> List<MaGenre>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onLoadPlaylistDetails: suspend (MaMediaItem) -> MaPlaylistDetails,
     onCreateMusicPlaylist: suspend (String) -> Unit,
@@ -1907,6 +1918,7 @@ private fun VesperMobile(
                     onRetry = onRetryMusic,
                     onLoadArtistAlbums = onLoadArtistAlbums,
                     onLoadCategory = onLoadMusicCategory,
+                    onLoadGenres = onLoadMusicGenres,
                     onLoadAlbumDetails = onLoadAlbumDetails,
                     onSearchMusicLibrary = onMusicLibrarySearch,
                     onOpenMyV = { openTab(MobileTab.MYV) },
@@ -3269,7 +3281,8 @@ private fun MusicHub(
     userAvatarUrl: String?,
     onRetry: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
-    onLoadCategory: suspend (String) -> List<MaMediaItem>,
+    onLoadCategory: suspend (String, Int?) -> List<MaMediaItem>,
+    onLoadGenres: suspend (String) -> List<MaGenre>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onSearchMusicLibrary: suspend (String) -> MaSearchResults,
     onOpenMyV: () -> Unit,
@@ -3343,6 +3356,7 @@ private fun MusicHub(
                     category = category,
                     onBack = { selectedCategory = null },
                     onLoad = onLoadCategory,
+                    onLoadGenres = onLoadGenres,
                     onSelect = openMusicItem,
                     onToggleFavorite = onToggleMusicFavourite,
                     favoriteUris = musicFavourites.map { it.uri }.toSet(),
@@ -3556,7 +3570,8 @@ private fun MusicHub(
 private fun MusicCategoryBrowser(
     category: String,
     onBack: () -> Unit,
-    onLoad: suspend (String) -> List<MaMediaItem>,
+    onLoad: suspend (String, Int?) -> List<MaMediaItem>,
+    onLoadGenres: suspend (String) -> List<MaGenre>,
     onSelect: (MaMediaItem) -> Unit,
     onToggleFavorite: (MaMediaItem) -> Unit,
     favoriteUris: Set<String>,
@@ -3566,17 +3581,31 @@ private fun MusicCategoryBrowser(
     var loading by remember(category) { mutableStateOf(true) }
     var error by remember(category) { mutableStateOf<String?>(null) }
     var retry by remember(category) { mutableStateOf(0) }
-    var genre by remember(category) { mutableStateOf<String?>(null) }
+    var genre by remember(category) { mutableStateOf<MaGenre?>(null) }
+    var genreChoices by remember(category) { mutableStateOf<List<MaGenre>>(emptyList()) }
+    var genreError by remember(category) { mutableStateOf<String?>(null) }
     var search by remember(category) { mutableStateOf("") }
     var sort by remember(category) {
         mutableStateOf(if (category == "Recently Played") "Recent" else "A–Z")
     }
 
-    LaunchedEffect(category, retry) {
+    LaunchedEffect(category) {
+        genreChoices = emptyList()
+        genreError = null
+        if (category != "Recently Played") {
+            try {
+                genreChoices = onLoadGenres(category)
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                genreError = "Music genres couldn't be loaded. Try opening this category again."
+            }
+        }
+    }
+    LaunchedEffect(category, retry, genre?.id) {
         loading = true
         error = null
         try {
-            entries = onLoad(category)
+            entries = onLoad(category, genre?.id)
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
             error = failure.message ?: "Couldn't load this collection."
@@ -3584,10 +3613,15 @@ private fun MusicCategoryBrowser(
             loading = false
         }
     }
-    val genres = entries.flatMap { it.genres }.map { it.trim() }
-        .filter { it.isNotBlank() }.distinct().sorted()
+    // History contains mixed media, and its endpoint doesn't accept a genre
+    // argument. Only use genres that appear on the history items themselves.
+    val historyGenres = if (category == "Recently Played") {
+        entries.flatMap { it.genres }.map { it.trim() }
+            .filter { it.isNotBlank() }.distinct().sorted()
+    } else emptyList()
     val visible = entries.filter { entry ->
-        (genre == null || entry.genres.any { it.equals(genre, ignoreCase = true) }) &&
+        (category != "Recently Played" || genre == null ||
+            entry.genres.any { it.equals(genre?.name, ignoreCase = true) }) &&
             (search.isBlank() || entry.name.contains(search.trim(), ignoreCase = true) ||
                 entry.subtitle.contains(search.trim(), ignoreCase = true))
     }.let { filtered ->
@@ -3630,18 +3664,24 @@ private fun MusicCategoryBrowser(
                 }
             }
             Spacer(Modifier.height(10.dp))
+            val genres = if (category == "Recently Played") {
+                historyGenres.mapIndexed { index, name -> MaGenre(index, name) }
+            } else genreChoices
             if (genres.isNotEmpty()) {
-                LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     item { GenreChip("All genres", genre == null) { genre = null } }
-                    items(genres, key = { it }) { option ->
-                        GenreChip(option, genre == option) {
-                            genre = if (genre == option) null else option
+                    items(genres, key = { it.id }) { option ->
+                        GenreChip(option.name, genre?.id == option.id) {
+                            genre = if (genre?.id == option.id) null else option
                         }
                     }
                 }
             } else {
-                BasicText("Genre filters appear when Music Assistant provides genre tags.",
+                BasicText(
+                    genreError ?: "No indexed music genres for this category yet.",
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                     style = TextStyle(color = Color(0xFF768391), fontSize = 11.sp))
             }
