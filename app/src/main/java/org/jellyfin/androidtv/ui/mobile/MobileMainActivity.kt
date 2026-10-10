@@ -299,7 +299,8 @@ class MobileMainActivity : FragmentActivity() {
         lifecycleScope.launch {
             state = runCatching {
                 withContext(Dispatchers.IO) {
-                    val resume = async {
+                    kotlinx.coroutines.supervisorScope {
+                    val resume = async { runCatching {
                         api.itemsApi.getResumeItems(
                             fields = ItemRepository.browseFields,
                             imageTypeLimit = 1,
@@ -308,8 +309,8 @@ class MobileMainActivity : FragmentActivity() {
                             includeItemTypes = listOf(BaseItemKind.EPISODE, BaseItemKind.MOVIE),
                             excludeActiveSessions = true,
                         ).content.items
-                    }
-                    val favorites = async {
+                    }.onFailure { if (it is CancellationException) throw it } }
+                    val favorites = async { runCatching {
                         api.itemsApi.getItems(
                             fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
@@ -320,8 +321,8 @@ class MobileMainActivity : FragmentActivity() {
                             sortBy = setOf(ItemSortBy.PLAY_COUNT),
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
-                    }
-                    val movies = async {
+                    }.onFailure { if (it is CancellationException) throw it } }
+                    val movies = async { runCatching {
                         api.itemsApi.getItems(
                             fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.MOVIE),
@@ -331,8 +332,8 @@ class MobileMainActivity : FragmentActivity() {
                             sortBy = setOf(ItemSortBy.PLAY_COUNT),
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
-                    }
-                    val shows = async {
+                    }.onFailure { if (it is CancellationException) throw it } }
+                    val shows = async { runCatching {
                         api.itemsApi.getItems(
                             fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.SERIES),
@@ -342,8 +343,8 @@ class MobileMainActivity : FragmentActivity() {
                             sortBy = setOf(ItemSortBy.PLAY_COUNT),
                             sortOrder = setOf(SortOrder.DESCENDING),
                         ).content.items
-                    }
-                    val serviceBoxSets = async {
+                    }.onFailure { if (it is CancellationException) throw it } }
+                    val serviceBoxSets = async { runCatching {
                         api.itemsApi.getItems(
                             fields = emptySet(),
                             includeItemTypes = setOf(BaseItemKind.BOX_SET),
@@ -352,8 +353,8 @@ class MobileMainActivity : FragmentActivity() {
                             limit = 1000,
                             sortBy = setOf(ItemSortBy.SORT_NAME),
                         ).content.items
-                    }
-                    val boxSets = async {
+                    }.onFailure { if (it is CancellationException) throw it } }
+                    val boxSets = async { runCatching {
                         api.itemsApi.getItems(
                             fields = ItemRepository.browseFields,
                             includeItemTypes = setOf(BaseItemKind.BOX_SET),
@@ -362,20 +363,34 @@ class MobileMainActivity : FragmentActivity() {
                             limit = 100,
                             sortBy = setOf(ItemSortBy.SORT_NAME),
                         ).content.items
+                    }.onFailure { if (it is CancellationException) throw it } }
+
+                    val resumeResult = resume.await()
+                    val favoritesResult = favorites.await()
+                    val moviesResult = movies.await()
+                    val showsResult = shows.await()
+                    val serviceResult = serviceBoxSets.await()
+                    val collectionResult = boxSets.await()
+
+                    // Individual request failures must not hide successful video
+                    // queries. A total Jellyfin outage still shows an error.
+                    val primary = listOf(resumeResult, moviesResult, showsResult)
+                    if (primary.all { it.isFailure }) {
+                        throw primary.firstNotNullOf { it.exceptionOrNull() }
                     }
 
-                    val allServiceCollections = serviceBoxSets.await()
-                    val allCollections = boxSets.await()
+                    val availableServices = serviceResult.getOrDefault(emptyList())
                     MobileHomeState(
-                        continueWatching = resume.await().filterNot(::isServiceArtifact),
-                        myV = favorites.await().filterNot(::isServiceArtifact),
-                        movies = movies.await().filterNot(::isServiceArtifact),
-                        shows = shows.await().filterNot(::isServiceArtifact),
+                        continueWatching = resumeResult.getOrDefault(emptyList()).filterNot(::isServiceArtifact),
+                        myV = favoritesResult.getOrDefault(emptyList()).filterNot(::isServiceArtifact),
+                        movies = moviesResult.getOrDefault(emptyList()).filterNot(::isServiceArtifact),
+                        shows = showsResult.getOrDefault(emptyList()).filterNot(::isServiceArtifact),
                         services = serviceOrder.mapNotNull { key ->
-                            allServiceCollections.firstOrNull { serviceKey(it.name) == key }
+                            availableServices.firstOrNull { serviceKey(it.name) == key }
                         },
-                        collections = allCollections.filterNot(::isServiceCollection),
+                        collections = collectionResult.getOrDefault(emptyList()).filterNot(::isServiceCollection),
                     )
+                    }
                 }
             }.getOrElse { error ->
                 MobileHomeState(error = friendlyServiceError("Jellyfin", error))
