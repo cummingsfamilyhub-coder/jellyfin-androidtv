@@ -1,3 +1,4 @@
+# Build trigger: artist browsing verification (no workflow behaviour changes)
 name: Build Vesper Mobile Debug APK
 
 on:
