@@ -18,6 +18,7 @@ internal data class MaMediaItem(
     val subtitle: String,
     val imageUrl: String?,
     val playable: Boolean = true,
+    val editable: Boolean = false,
 )
 
 internal data class MaPlayer(
@@ -73,6 +74,9 @@ internal data class MaSearchResults(
     val all: List<MaMediaItem>
         get() = artists + albums + tracks
 }
+
+internal data class MaPlaylistTrack(val item: MaMediaItem, val position: Int)
+internal data class MaPlaylistDetails(val title: String, val editable: Boolean, val tracks: List<MaPlaylistTrack>)
 
 internal data class MaAlbumTrack(
     val item: MaMediaItem,
@@ -203,6 +207,61 @@ internal class MusicAssistantClient(
             releaseYear = metadata.optInt("year", 0).takeIf { it > 0 },
             tracks = tracks,
         )
+    }
+
+    fun loadPlaylistDetails(playlist: MaMediaItem): MaPlaylistDetails {
+        require(playlist.mediaType == "playlist" && playlist.itemId.isNotBlank()) { "Playlist details unavailable." }
+        val info = command("music/playlists/get_playlist", JSONObject()
+            .put("item_id", playlist.itemId)
+            .put("provider_instance_id_or_domain", playlist.provider)) as? JSONObject
+            ?: error("Couldn't load playlist.")
+        val tracks = commandArray("music/playlists/playlist_tracks", JSONObject()
+            .put("item_id", playlist.itemId)
+            .put("provider_instance_id_or_domain", playlist.provider))
+            .mapIndexedNotNull { index, obj ->
+                parseMediaItem(obj)?.let { MaPlaylistTrack(it, index + 1) }
+            }
+        return MaPlaylistDetails(
+            title = info.optString("name").takeIf { it.isNotBlank() } ?: playlist.name,
+            editable = info.optBoolean("is_editable", false) &&
+                playlist.provider == "library" && playlist.itemId.toIntOrNull() != null,
+            tracks = tracks,
+        )
+    }
+
+    fun createPlaylist(name: String) {
+        require(name.isNotBlank()) { "Enter a name." }
+        command("music/playlists/create_playlist", JSONObject()
+            .put("name", name.trim())
+            .put("provider_instance_or_domain", "builtin"))
+    }
+
+    private fun editablePlaylistId(playlist: MaMediaItem): Int {
+        require(playlist.mediaType == "playlist" && playlist.provider == "library" &&
+            playlist.editable) { "This playlist is not editable." }
+        return playlist.itemId.toIntOrNull() ?: error("Playlist isn't in the Music Assistant library.")
+    }
+
+    fun renamePlaylist(playlist: MaMediaItem, name: String) {
+        require(name.isNotBlank()) { "Enter a name." }
+        command("music/playlists/update", JSONObject()
+            .put("item_id", editablePlaylistId(playlist))
+            .put("update", JSONObject().put("name", name.trim()))
+            .put("overwrite", false))
+    }
+
+    fun addPlaylistTrack(playlist: MaMediaItem, track: MaMediaItem) {
+        require(track.mediaType == "track" && track.uri.isNotBlank()) { "Choose a track." }
+        command("music/playlists/add_playlist_tracks", JSONObject()
+            .put("db_playlist_id", editablePlaylistId(playlist))
+            .put("uris", JSONArray(listOf(track.uri))))
+    }
+
+    fun removePlaylistTrack(playlist: MaMediaItem, position: Int) {
+        require(position > 0) { "Invalid track position." }
+        command("music/playlists/remove_playlist_tracks", JSONObject()
+            .put("db_playlist_id", editablePlaylistId(playlist))
+            .put("positions_to_remove", JSONArray(listOf(position))))
     }
 
     fun searchLibrary(query: String, limit: Int = 12): MaSearchResults {
@@ -560,6 +619,7 @@ internal class MusicAssistantClient(
             subtitle = subtitle,
             imageUrl = mediaImageUrl(json),
             playable = json.optBoolean("is_playable", mediaType != "artist"),
+            editable = json.optBoolean("is_editable", false),
         )
     }
 
@@ -641,7 +701,8 @@ internal class MusicAssistantClient(
         val currentTitle = playerCurrent?.optString("title")?.takeIf { it.isNotBlank() }
             ?: queueMedia?.optString("name")?.takeIf { it.isNotBlank() }
             ?: queueCurrent?.optString("name")?.takeIf { it.isNotBlank() }
-        val currentArtist = playerCurrent?.optString("artist")?.takeIf { it.isNotBlank() }
+        val currentArtist = playerCurrent?.optString("artist")
+            ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
             ?: queueMedia?.let(::artistNames)?.takeIf { it.isNotBlank() }
         val currentImageUrl = playerCurrent?.optString("image_url")
             ?.takeIf { it.isNotBlank() }

@@ -248,6 +248,11 @@ class MobileMainActivity : FragmentActivity() {
                 onRetryMusic = ::loadMusic,
                 onLoadArtistAlbums = ::loadMusicArtistAlbums,
                 onLoadAlbumDetails = ::loadMusicAlbumDetails,
+                onLoadPlaylistDetails = ::loadMusicPlaylistDetails,
+                onCreateMusicPlaylist = ::createMusicPlaylist,
+                onRenameMusicPlaylist = ::renameMusicPlaylist,
+                onAddMusicPlaylistTrack = ::addMusicPlaylistTrack,
+                onRemoveMusicPlaylistTrack = ::removeMusicPlaylistTrack,
                 onPlayMusic = ::playMusic,
                 onControlMusic = ::controlMusic,
                 onSeekMusic = ::seekMusic,
@@ -965,6 +970,35 @@ class MobileMainActivity : FragmentActivity() {
                 baseUrl = musicAssistantBaseUrl,
                 token = musicAssistantToken,
             ).loadAlbumDetails(album)
+        }
+
+    private suspend fun loadMusicPlaylistDetails(playlist: MaMediaItem): MaPlaylistDetails =
+        withContext(Dispatchers.IO) {
+            MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken).loadPlaylistDetails(playlist)
+        }
+
+    private suspend fun createMusicPlaylist(name: String) {
+        withContext(Dispatchers.IO) {
+            MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken).createPlaylist(name)
+        }
+        loadMusic()
+    }
+
+    private suspend fun renameMusicPlaylist(playlist: MaMediaItem, name: String) {
+        withContext(Dispatchers.IO) {
+            MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken).renamePlaylist(playlist, name)
+        }
+        loadMusic()
+    }
+
+    private suspend fun addMusicPlaylistTrack(playlist: MaMediaItem, track: MaMediaItem) =
+        withContext(Dispatchers.IO) {
+            MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken).addPlaylistTrack(playlist, track)
+        }
+
+    private suspend fun removeMusicPlaylistTrack(playlist: MaMediaItem, position: Int) =
+        withContext(Dispatchers.IO) {
+            MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken).removePlaylistTrack(playlist, position)
         }
 
     private fun loadMusic() {
@@ -1701,6 +1735,11 @@ private fun VesperMobile(
     onRetryMusic: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
+    onLoadPlaylistDetails: suspend (MaMediaItem) -> MaPlaylistDetails,
+    onCreateMusicPlaylist: suspend (String) -> Unit,
+    onRenameMusicPlaylist: suspend (MaMediaItem, String) -> Unit,
+    onAddMusicPlaylistTrack: suspend (MaMediaItem, MaMediaItem) -> Unit,
+    onRemoveMusicPlaylistTrack: suspend (MaMediaItem, Int) -> Unit,
     onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControlMusic: (MaPlayer, MusicPlayerAction) -> Unit,
     onSeekMusic: (MaPlayer, Int) -> Unit,
@@ -1794,6 +1833,11 @@ private fun VesperMobile(
                     onRetry = onRetryMusic,
                     onLoadArtistAlbums = onLoadArtistAlbums,
                     onLoadAlbumDetails = onLoadAlbumDetails,
+                    onLoadPlaylistDetails = onLoadPlaylistDetails,
+                    onCreatePlaylist = onCreateMusicPlaylist,
+                    onRenamePlaylist = onRenameMusicPlaylist,
+                    onAddPlaylistTrack = onAddMusicPlaylistTrack,
+                    onRemovePlaylistTrack = onRemoveMusicPlaylistTrack,
                     onPlay = onPlayMusic,
                     onControl = onControlMusic,
                     onUpdateGroup = onUpdateMusicGroup,
@@ -2046,7 +2090,7 @@ private fun VesperMiniPlayer(
             Spacer(Modifier.height(2.dp))
             BasicText(
                 buildList {
-                    player.currentArtist?.takeIf { it.isNotBlank() }?.let(::add)
+                    player.currentArtist?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }?.let(::add)
                     add(player.name)
                     if (players.size > 1) add("${safeIndex + 1}/${players.size}")
                 }.joinToString(" · "),
@@ -3099,6 +3143,11 @@ private fun MusicHub(
     onRetry: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
+    onLoadPlaylistDetails: suspend (MaMediaItem) -> MaPlaylistDetails,
+    onCreatePlaylist: suspend (String) -> Unit,
+    onRenamePlaylist: suspend (MaMediaItem, String) -> Unit,
+    onAddPlaylistTrack: suspend (MaMediaItem, MaMediaItem) -> Unit,
+    onRemovePlaylistTrack: suspend (MaMediaItem, Int) -> Unit,
     onPlay: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onUpdateGroup: (MaPlayer, Set<String>) -> Unit,
@@ -3109,18 +3158,26 @@ private fun MusicHub(
     var pendingItem by remember { mutableStateOf<MaMediaItem?>(null) }
     var selectedArtist by remember { mutableStateOf<MaMediaItem?>(null) }
     var selectedAlbum by remember { mutableStateOf<MaMediaItem?>(null) }
+    var selectedPlaylist by remember { mutableStateOf<MaMediaItem?>(null) }
+    var createPlaylistDialog by remember { mutableStateOf(false) }
+    var trackForPlaylist by remember { mutableStateOf<MaMediaItem?>(null) }
     val musicListState = rememberLazyListState()
     val openMusicItem: (MaMediaItem) -> Unit = { item ->
         when (item.mediaType) {
             "artist" -> selectedArtist = item
             "album" -> selectedAlbum = item
+            "playlist" -> selectedPlaylist = item
             else -> if (item.playable) pendingItem = item
         }
     }
 
-    BackHandler(enabled = selectedArtist != null || selectedAlbum != null || pendingItem != null) {
+    BackHandler(enabled = selectedArtist != null || selectedAlbum != null || selectedPlaylist != null ||
+        pendingItem != null || createPlaylistDialog || trackForPlaylist != null) {
         when {
             pendingItem != null -> pendingItem = null
+            trackForPlaylist != null -> trackForPlaylist = null
+            createPlaylistDialog -> createPlaylistDialog = false
+            selectedPlaylist != null -> selectedPlaylist = null
             selectedAlbum != null -> selectedAlbum = null
             else -> selectedArtist = null
         }
@@ -3215,14 +3272,18 @@ private fun MusicHub(
                         )
                     }
 
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            BasicText("Your Playlists", modifier = Modifier.weight(1f),
+                                style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold))
+                            DarkButton("+ New") { createPlaylistDialog = true }
+                        }
+                    }
                     if (snapshot.playlists.isNotEmpty()) item {
-                        MaMediaRow(
-                            title = "Playlists",
-                            items = snapshot.playlists,
-                            onClick = { item ->
-                                if (item.playable) pendingItem = item
-                            },
-                        )
+                        MaMediaRow(title = "Playlists", items = snapshot.playlists, onClick = openMusicItem)
                     }
 
                     if (snapshot.players.isNotEmpty()) item {
@@ -3244,6 +3305,44 @@ private fun MusicHub(
                 onSelectPlayback = { item ->
                     if (item.playable) pendingItem = item
                 },
+                onAddTrackToPlaylist = { track ->
+                    if (track.mediaType == "track") trackForPlaylist = track
+                },
+            )
+        }
+
+        selectedPlaylist?.let { playlist ->
+            MusicPlaylistDetail(
+                playlist = playlist,
+                onBack = { selectedPlaylist = null },
+                onLoad = onLoadPlaylistDetails,
+                onRename = onRenamePlaylist,
+                onRemove = onRemovePlaylistTrack,
+                onPlay = { item -> if (item.playable) pendingItem = item },
+                onRenamed = { selectedPlaylist = playlist.copy(name = it) },
+            )
+        }
+
+        if (createPlaylistDialog) {
+            MusicPlaylistNameDialog(
+                title = "New playlist", initial = "", actionLabel = "Create",
+                onDismiss = { createPlaylistDialog = false },
+                onSave = { name ->
+                    onCreatePlaylist(name)
+                    createPlaylistDialog = false
+                },
+            )
+        }
+
+        trackForPlaylist?.let { track ->
+            MusicPlaylistAddDialog(
+                track = track,
+                playlists = state.snapshot.playlists.filter {
+                    it.provider == "library" && it.editable && it.itemId.toIntOrNull() != null
+                },
+                onDismiss = { trackForPlaylist = null },
+                onAdd = { playlist -> onAddPlaylistTrack(playlist, track) },
+                onSaved = { trackForPlaylist = null },
             )
         }
 
@@ -3383,6 +3482,7 @@ private fun MusicAlbumDetail(
     onBack: () -> Unit,
     onLoadDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onSelectPlayback: (MaMediaItem) -> Unit,
+    onAddTrackToPlaylist: (MaMediaItem) -> Unit,
 ) {
     var details by remember(album.uri) { mutableStateOf<MaAlbumDetails?>(null) }
     var loading by remember(album.uri) { mutableStateOf(true) }
@@ -3569,6 +3669,12 @@ private fun MusicAlbumDetail(
                                 )
                             }
                         }
+                        if (entry.item.mediaType == "track") {
+                            BasicText("＋", modifier = Modifier
+                                .clickable { onAddTrackToPlaylist(entry.item) }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                                style = TextStyle(color = Color(0xFFA98CFF), fontSize = 20.sp))
+                        }
                         entry.durationSeconds?.let { seconds ->
                             val durationText = (seconds / 60).toString() + ":" +
                                 (seconds % 60).toString().padStart(2, '0')
@@ -3578,6 +3684,253 @@ private fun MusicAlbumDetail(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun MusicPlaylistNameDialog(
+    title: String,
+    initial: String,
+    actionLabel: String,
+    onDismiss: () -> Unit,
+    onSave: suspend (String) -> Unit,
+) {
+    var name by remember(title, initial) { mutableStateOf(initial) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    Popup(alignment = Alignment.Center, onDismissRequest = { if (!busy) onDismiss() },
+        properties = PopupProperties(focusable = true)) {
+        Column(Modifier.width(320.dp).clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF171725)).padding(20.dp)) {
+            BasicText(title, style = TextStyle(color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF101821)).padding(13.dp)) {
+                BasicTextField(value = name, onValueChange = { name = it },
+                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                    singleLine = true, cursorBrush = SolidColor(Color(0xFFA98CFF)),
+                    modifier = Modifier.fillMaxWidth())
+            }
+            error?.let {
+                BasicText(it, style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 12.sp))
+            }
+            Spacer(Modifier.height(15.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                DarkButton("Cancel") { if (!busy) onDismiss() }
+                VesperButton(if (busy) "Saving…" else actionLabel, {
+                    if (!busy) {
+                        if (name.isBlank()) error = "Enter a playlist name."
+                        else {
+                            busy = true
+                            scope.launch {
+                                try { onSave(name.trim()) }
+                                catch (e: Exception) {
+                                    if (e is CancellationException) throw e
+                                    error = e.message ?: "Couldn't save playlist."
+                                } finally { busy = false }
+                            }
+                        }
+                    }
+                })
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicPlaylistAddDialog(
+    track: MaMediaItem,
+    playlists: List<MaMediaItem>,
+    onDismiss: () -> Unit,
+    onAdd: suspend (MaMediaItem) -> Unit,
+    onSaved: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Popup(alignment = Alignment.Center, onDismissRequest = { if (!busy) onDismiss() },
+        properties = PopupProperties(focusable = true)) {
+        Column(Modifier.width(325.dp).clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF171725)).padding(18.dp)) {
+            BasicText("Add to playlist", style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold))
+            BasicText(track.name, style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp), maxLines = 2)
+            Spacer(Modifier.height(12.dp))
+            if (playlists.isEmpty()) {
+                BasicText("No editable playlists. Create one from Music first.",
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp))
+            } else {
+                LazyColumn(modifier = Modifier.height(240.dp)) {
+                    items(playlists, key = { it.uri }) { playlist ->
+                        BasicText(playlist.name,
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = !busy) {
+                                busy = true
+                                scope.launch {
+                                    try { onAdd(playlist); onSaved() }
+                                    catch (e: Exception) {
+                                        if (e is CancellationException) throw e
+                                        error = e.message ?: "Couldn't add track."
+                                    } finally { busy = false }
+                                }
+                            }.padding(vertical = 13.dp),
+                            style = TextStyle(color = Color.White, fontSize = 14.sp))
+                    }
+                }
+            }
+            error?.let { BasicText(it, style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 12.sp)) }
+            Spacer(Modifier.height(8.dp))
+            DarkButton("Close") { if (!busy) onDismiss() }
+        }
+    }
+}
+
+@Composable
+private fun MusicPlaylistDetail(
+    playlist: MaMediaItem,
+    onBack: () -> Unit,
+    onLoad: suspend (MaMediaItem) -> MaPlaylistDetails,
+    onRename: suspend (MaMediaItem, String) -> Unit,
+    onRemove: suspend (MaMediaItem, Int) -> Unit,
+    onPlay: (MaMediaItem) -> Unit,
+    onRenamed: (String) -> Unit,
+) {
+    var details by remember(playlist.uri) { mutableStateOf<MaPlaylistDetails?>(null) }
+    var loading by remember(playlist.uri) { mutableStateOf(true) }
+    var error by remember(playlist.uri) { mutableStateOf<String?>(null) }
+    var retry by remember(playlist.uri) { mutableStateOf(0) }
+    var rename by remember(playlist.uri) { mutableStateOf(false) }
+    var remove by remember(playlist.uri) { mutableStateOf<MaPlaylistTrack?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(playlist.uri, retry) {
+        loading = true; error = null
+        try { details = onLoad(playlist) }
+        catch (e: Exception) {
+            if (e is CancellationException) throw e
+            error = e.message ?: "Couldn't load playlist."
+        } finally { loading = false }
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF05080C)),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
+    ) {
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(42.dp).clip(RoundedCornerShape(21.dp))
+                    .background(Color(0x22FFFFFF)).clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center) {
+                    BasicText("‹", style = TextStyle(color = Color.White, fontSize = 30.sp))
+                }
+                Spacer(Modifier.width(14.dp))
+                BasicText("Playlists", style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 15.sp))
+            }
+        }
+        item {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(174.dp).clip(RoundedCornerShape(26.dp))
+                    .background(Color(0xFF181632)), contentAlignment = Alignment.Center) {
+                    if (!playlist.imageUrl.isNullOrBlank())
+                        AsyncImage(modifier = Modifier.fillMaxSize(), url = playlist.imageUrl,
+                            scaleType = ImageView.ScaleType.CENTER_CROP)
+                    else VesperPlaylistArtwork(playlist.name)
+                }
+                Spacer(Modifier.height(15.dp))
+                BasicText(details?.title ?: playlist.name,
+                    style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 2)
+                Spacer(Modifier.height(5.dp))
+                BasicText(details?.tracks?.size?.let { "$it tracks" } ?: "PLAYLIST",
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 12.sp))
+                Spacer(Modifier.height(13.dp))
+                if (playlist.playable) VesperButton("Play playlist", { onPlay(playlist) })
+                if (details?.editable == true) {
+                    Spacer(Modifier.height(10.dp))
+                    DarkButton("Rename") { rename = true }
+                }
+            }
+        }
+        item {
+            BasicText("Tracks", modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                style = TextStyle(color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold))
+        }
+        when {
+            loading -> item { BasicText("Loading…", modifier = Modifier.padding(20.dp),
+                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp)) }
+            error != null -> item {
+                Column(Modifier.padding(20.dp)) {
+                    BasicText(error.orEmpty(), style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 13.sp))
+                    DarkButton("Retry") { retry++ }
+                }
+            }
+            details?.tracks.isNullOrEmpty() -> item {
+                BasicText("This playlist is empty.", modifier = Modifier.padding(20.dp),
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp))
+            }
+            else -> items(details?.tracks.orEmpty(), key = { "${it.position}:${it.item.uri}" }) { entry ->
+                Row(Modifier.fillMaxWidth()
+                    .clickable(enabled = entry.item.playable) { onPlay(entry.item) }
+                    .padding(horizontal = 20.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    BasicText(entry.position.toString(), modifier = Modifier.width(34.dp),
+                        style = TextStyle(color = Color(0xFF8F98A5), fontSize = 13.sp))
+                    Column(Modifier.weight(1f)) {
+                        BasicText(entry.item.name, maxLines = 2,
+                            style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold))
+                        if (entry.item.subtitle.isNotBlank()) {
+                            BasicText(entry.item.subtitle, maxLines = 1,
+                                style = TextStyle(color = Color(0xFF8F98A5), fontSize = 11.sp))
+                        }
+                    }
+                    if (details?.editable == true) {
+                        BasicText("×", modifier = Modifier
+                            .clickable(enabled = !saving) { remove = entry }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 20.sp))
+                    }
+                }
+            }
+        }
+    }
+    if (rename) MusicPlaylistNameDialog(
+        title = "Rename playlist", initial = details?.title ?: playlist.name, actionLabel = "Rename",
+        onDismiss = { rename = false },
+        onSave = { name -> onRename(playlist, name); onRenamed(name); rename = false },
+    )
+    remove?.let { candidate ->
+        Popup(alignment = Alignment.Center, onDismissRequest = { if (!saving) remove = null },
+            properties = PopupProperties(focusable = true)) {
+            Column(Modifier.width(310.dp).clip(RoundedCornerShape(20.dp))
+                .background(Color(0xFF171725)).padding(18.dp)) {
+                BasicText("Remove from playlist?", style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold))
+                Spacer(Modifier.height(8.dp))
+                BasicText(candidate.item.name,
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp))
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DarkButton("Cancel") { if (!saving) remove = null }
+                    VesperButton(if (saving) "Removing…" else "Remove", {
+                        if (!saving) {
+                            saving = true
+                            scope.launch {
+                                try {
+                                    onRemove(playlist, candidate.position)
+                                    remove = null
+                                    delay(950)
+                                    retry++
+                                } catch (e: Exception) {
+                                    if (e is CancellationException) throw e
+                                    error = e.message ?: "Couldn't remove track."
+                                    remove = null
+                                } finally { saving = false }
+                            }
+                        }
+                    })
                 }
             }
         }
