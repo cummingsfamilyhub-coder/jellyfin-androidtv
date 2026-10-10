@@ -990,6 +990,11 @@ class MobileMainActivity : FragmentActivity() {
         }
     }
 
+    private suspend fun loadMusicCategoryItems(category: String): List<MaMediaItem> =
+        withContext(Dispatchers.IO) {
+            MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken).loadCategoryItems(category)
+        }
+
     private suspend fun loadMusicArtistAlbums(artist: MaMediaItem): List<MaMediaItem> =
         withContext(Dispatchers.IO) {
             MusicAssistantClient(
@@ -1884,6 +1889,7 @@ private fun VesperMobile(
                     userAvatarUrl = userAvatarUrl,
                     onRetry = onRetryMusic,
                     onLoadArtistAlbums = onLoadArtistAlbums,
+                    onLoadCategory = onLoadMusicCategoryItems,
                     onLoadAlbumDetails = onLoadAlbumDetails,
                     onSearchMusicLibrary = onMusicLibrarySearch,
                     onOpenMyV = { openTab(MobileTab.MYV) },
@@ -3246,6 +3252,7 @@ private fun MusicHub(
     userAvatarUrl: String?,
     onRetry: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
+    onLoadCategory: suspend (String) -> List<MaMediaItem>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onSearchMusicLibrary: suspend (String) -> MaSearchResults,
     onOpenMyV: () -> Unit,
@@ -3271,7 +3278,7 @@ private fun MusicHub(
     var createPlaylistDialog by remember { mutableStateOf(false) }
     var trackForPlaylist by remember { mutableStateOf<MaMediaItem?>(null) }
     var trackActionsItem by remember { mutableStateOf<MaMediaItem?>(null) }
-    var favoriteSearchOpen by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
     val musicListState = rememberLazyListState()
     val openMusicItem: (MaMediaItem) -> Unit = { item ->
         when (item.mediaType) {
@@ -3284,16 +3291,16 @@ private fun MusicHub(
 
     BackHandler(enabled = selectedArtist != null || selectedAlbum != null || selectedPlaylist != null ||
         pendingItem != null || createPlaylistDialog ||
-        trackForPlaylist != null || trackActionsItem != null || favoriteSearchOpen) {
+        trackForPlaylist != null || trackActionsItem != null || selectedCategory != null) {
         when {
             pendingItem != null -> pendingItem = null
-            favoriteSearchOpen -> favoriteSearchOpen = false
             trackForPlaylist != null -> trackForPlaylist = null
             trackActionsItem != null -> trackActionsItem = null
             createPlaylistDialog -> createPlaylistDialog = false
-            selectedPlaylist != null -> selectedPlaylist = null
             selectedAlbum != null -> selectedAlbum = null
-            else -> selectedArtist = null
+            selectedPlaylist != null -> selectedPlaylist = null
+            selectedArtist != null -> selectedArtist = null
+            else -> selectedCategory = null
         }
     }
 
@@ -3306,6 +3313,25 @@ private fun MusicHub(
                 onLoadAlbums = onLoadArtistAlbums,
                 onAlbumSelected = { album -> selectedAlbum = album },
             )
+        } else if (selectedCategory != null) {
+            val category = selectedCategory.orEmpty()
+            if (category == "Rooms") {
+                MusicRoomsBrowser(
+                    players = state.snapshot.players,
+                    onBack = { selectedCategory = null },
+                    onOpenPlayer = onOpenNowPlaying,
+                )
+            } else {
+                MusicCategoryBrowser(
+                    category = category,
+                    onBack = { selectedCategory = null },
+                    onLoad = onLoadCategory,
+                    onSelect = openMusicItem,
+                    onToggleFavorite = onToggleMusicFavourite,
+                    favoriteUris = musicFavourites.map { it.uri }.toSet(),
+                    onNewPlaylist = { createPlaylistDialog = true },
+                )
+            }
         } else {
         LazyColumn(
             state = musicListState,
@@ -3315,7 +3341,7 @@ private fun MusicHub(
             item {
                 MobileSectionTopBar(
                     title = "Music",
-                    subtitle = "Artists · Albums · Radio · Rooms",
+                    subtitle = "MyV · Artists · Playlists · Radio · Rooms",
                     userName = userName,
                     userAvatarUrl = userAvatarUrl,
                     onSwitchProfile = onSwitchProfile,
@@ -3353,14 +3379,12 @@ private fun MusicHub(
 
                     item {
                         MaMediaRow(
-                            title = "MyV · Favourite Tracks",
+                            title = "MyV",
                             items = musicFavourites,
                             onClick = { track -> if (track.playable) pendingItem = track },
                             favoriteUris = musicFavourites.map { it.uri }.toSet(),
                             onToggleFavorite = onToggleMusicFavourite,
                             onViewAll = onOpenMyV,
-                            actionLabel = "+ Save",
-                            onAction = { favoriteSearchOpen = true },
                         )
                     }
 
@@ -3369,16 +3393,9 @@ private fun MusicHub(
                             title = "Recently Played",
                             items = snapshot.recentlyPlayed,
                             onClick = openMusicItem,
+                            onViewAll = { selectedCategory = "Recently Played" },
                             favoriteUris = musicFavourites.map { it.uri }.toSet(),
                             onToggleFavorite = onToggleMusicFavourite,
-                        )
-                    }
-
-                    if (snapshot.albums.isNotEmpty()) item {
-                        MaMediaRow(
-                            title = "Albums",
-                            items = snapshot.albums,
-                            onClick = openMusicItem,
                         )
                     }
 
@@ -3388,6 +3405,18 @@ private fun MusicHub(
                             items = snapshot.artists,
                             onClick = { artistItem -> selectedArtist = artistItem },
                             artistStyle = true,
+                            onViewAll = { selectedCategory = "Artists" },
+                        )
+                    }
+
+                    item {
+                        MaMediaRow(
+                            title = "Playlists",
+                            items = snapshot.playlists,
+                            onClick = openMusicItem,
+                            onViewAll = { selectedCategory = "Playlists" },
+                            actionLabel = "+ New",
+                            onAction = { createPlaylistDialog = true },
                         )
                     }
 
@@ -3395,30 +3424,16 @@ private fun MusicHub(
                         MaMediaRow(
                             title = "Radio",
                             items = snapshot.radios,
-                            onClick = { item ->
-                                if (item.playable) pendingItem = item
-                            },
+                            onClick = { item -> if (item.playable) pendingItem = item },
+                            onViewAll = { selectedCategory = "Radio" },
                         )
-                    }
-
-                    item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            BasicText("Your Playlists", modifier = Modifier.weight(1f),
-                                style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold))
-                            DarkButton("+ New") { createPlaylistDialog = true }
-                        }
-                    }
-                    if (snapshot.playlists.isNotEmpty()) item {
-                        MaMediaRow(title = "Playlists", items = snapshot.playlists, onClick = openMusicItem)
                     }
 
                     if (snapshot.players.isNotEmpty()) item {
                         MaPlayerRow(
                             players = snapshot.players,
                             onClick = onOpenNowPlaying,
+                            onViewAll = { selectedCategory = "Rooms" },
                         )
                     }
                 }
@@ -3467,17 +3482,6 @@ private fun MusicHub(
                     onCreatePlaylist(name)
                     createPlaylistDialog = false
                 },
-            )
-        }
-
-        if (favoriteSearchOpen) {
-            MusicFavouriteSearchPopup(
-                title = "Find songs for MyV",
-                initialQuery = "",
-                onSearch = onSearchMusicLibrary,
-                favorites = musicFavourites,
-                onToggle = onToggleMusicFavourite,
-                onDismiss = { favoriteSearchOpen = false },
             )
         }
 
@@ -4918,12 +4922,15 @@ private fun VesperPlaylistArtwork(
 private fun MaPlayerRow(
     players: List<MaPlayer>,
     onClick: (MaPlayer) -> Unit,
+    onViewAll: (() -> Unit)? = null,
 ) {
     Column(Modifier.padding(top = 10.dp)) {
         BasicText(
-            "Around the House  ›",
+            "Rooms  ›",
             style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+            modifier = Modifier
+                .then(if (onViewAll != null) Modifier.clickable(onClick = onViewAll) else Modifier)
+                .padding(horizontal = 20.dp, vertical = 7.dp),
         )
 
         LazyRow(
