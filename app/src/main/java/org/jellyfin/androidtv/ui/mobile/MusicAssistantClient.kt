@@ -74,6 +74,18 @@ internal data class MaSearchResults(
         get() = artists + albums + tracks
 }
 
+internal data class MaAlbumTrack(
+    val item: MaMediaItem,
+    val trackNumber: Int,
+    val discNumber: Int,
+    val durationSeconds: Int?,
+)
+
+internal data class MaAlbumDetails(
+    val releaseYear: Int?,
+    val tracks: List<MaAlbumTrack>,
+)
+
 internal data class MusicAssistantSnapshot(
     val recentlyPlayed: List<MaMediaItem> = emptyList(),
     val artists: List<MaMediaItem> = emptyList(),
@@ -161,6 +173,36 @@ internal class MusicAssistantClient(
                 .put("item_id", artist.itemId)
                 .put("provider_instance_id_or_domain", artist.provider),
         ).mapNotNull(::parseMediaItem)
+    }
+
+    fun loadAlbumDetails(album: MaMediaItem): MaAlbumDetails {
+        require(album.mediaType == "album" && album.itemId.isNotBlank()) {
+            "Album details are unavailable."
+        }
+        val albumArgs = JSONObject()
+            .put("item_id", album.itemId)
+            .put("provider_instance_id_or_domain", album.provider)
+        val metadata = command("music/albums/get_album", albumArgs) as? JSONObject
+            ?: throw IllegalStateException("Couldn't load album details.")
+        val tracks = commandArray(
+            "music/albums/album_tracks",
+            JSONObject()
+                .put("item_id", album.itemId)
+                .put("provider_instance_id_or_domain", album.provider)
+                .put("in_library_only", false),
+        ).mapNotNull { track ->
+            val media = parseMediaItem(track) ?: return@mapNotNull null
+            MaAlbumTrack(
+                item = media,
+                trackNumber = track.optInt("track_number", 0),
+                discNumber = track.optInt("disc_number", 1).coerceAtLeast(1),
+                durationSeconds = track.optInt("duration", 0).takeIf { it > 0 },
+            )
+        }
+        return MaAlbumDetails(
+            releaseYear = metadata.optInt("year", 0).takeIf { it > 0 },
+            tracks = tracks,
+        )
     }
 
     fun searchLibrary(query: String, limit: Int = 12): MaSearchResults {

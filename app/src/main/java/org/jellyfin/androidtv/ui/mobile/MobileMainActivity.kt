@@ -247,6 +247,7 @@ class MobileMainActivity : FragmentActivity() {
                 },
                 onRetryMusic = ::loadMusic,
                 onLoadArtistAlbums = ::loadMusicArtistAlbums,
+                onLoadAlbumDetails = ::loadMusicAlbumDetails,
                 onPlayMusic = ::playMusic,
                 onControlMusic = ::controlMusic,
                 onSeekMusic = ::seekMusic,
@@ -956,6 +957,14 @@ class MobileMainActivity : FragmentActivity() {
                 baseUrl = musicAssistantBaseUrl,
                 token = musicAssistantToken,
             ).loadArtistAlbums(artist)
+        }
+
+    private suspend fun loadMusicAlbumDetails(album: MaMediaItem): MaAlbumDetails =
+        withContext(Dispatchers.IO) {
+            MusicAssistantClient(
+                baseUrl = musicAssistantBaseUrl,
+                token = musicAssistantToken,
+            ).loadAlbumDetails(album)
         }
 
     private fun loadMusic() {
@@ -1691,6 +1700,7 @@ private fun VesperMobile(
     onTabSelected: (MobileTab) -> Unit,
     onRetryMusic: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
+    onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControlMusic: (MaPlayer, MusicPlayerAction) -> Unit,
     onSeekMusic: (MaPlayer, Int) -> Unit,
@@ -1783,6 +1793,7 @@ private fun VesperMobile(
                     userAvatarUrl = userAvatarUrl,
                     onRetry = onRetryMusic,
                     onLoadArtistAlbums = onLoadArtistAlbums,
+                    onLoadAlbumDetails = onLoadAlbumDetails,
                     onPlay = onPlayMusic,
                     onControl = onControlMusic,
                     onUpdateGroup = onUpdateMusicGroup,
@@ -3087,6 +3098,7 @@ private fun MusicHub(
     userAvatarUrl: String?,
     onRetry: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
+    onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onPlay: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onUpdateGroup: (MaPlayer, Set<String>) -> Unit,
@@ -3096,10 +3108,22 @@ private fun MusicHub(
 ) {
     var pendingItem by remember { mutableStateOf<MaMediaItem?>(null) }
     var selectedArtist by remember { mutableStateOf<MaMediaItem?>(null) }
+    var selectedAlbum by remember { mutableStateOf<MaMediaItem?>(null) }
     val musicListState = rememberLazyListState()
+    val openMusicItem: (MaMediaItem) -> Unit = { item ->
+        when (item.mediaType) {
+            "artist" -> selectedArtist = item
+            "album" -> selectedAlbum = item
+            else -> if (item.playable) pendingItem = item
+        }
+    }
 
-    BackHandler(enabled = selectedArtist != null || pendingItem != null) {
-        if (pendingItem != null) pendingItem = null else selectedArtist = null
+    BackHandler(enabled = selectedArtist != null || selectedAlbum != null || pendingItem != null) {
+        when {
+            pendingItem != null -> pendingItem = null
+            selectedAlbum != null -> selectedAlbum = null
+            else -> selectedArtist = null
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -3109,9 +3133,7 @@ private fun MusicHub(
                 artist = artist,
                 onBack = { selectedArtist = null },
                 onLoadAlbums = onLoadArtistAlbums,
-                onAlbumSelected = { album ->
-                    if (album.playable) pendingItem = album
-                },
+                onAlbumSelected = { album -> selectedAlbum = album },
             )
         } else {
         LazyColumn(
@@ -3152,9 +3174,7 @@ private fun MusicHub(
                     item {
                         MusicHero(
                             snapshot = snapshot,
-                            onPlay = { item ->
-                                if (item.playable) pendingItem = item
-                            },
+                            onPlay = openMusicItem,
                             onControl = onControl,
                             onOpenPlayer = onOpenNowPlaying,
                         )
@@ -3164,9 +3184,7 @@ private fun MusicHub(
                         MaMediaRow(
                             title = "Recently Played",
                             items = snapshot.recentlyPlayed,
-                            onClick = { item ->
-                                if (item.playable) pendingItem = item
-                            },
+                            onClick = openMusicItem,
                         )
                     }
 
@@ -3174,9 +3192,7 @@ private fun MusicHub(
                         MaMediaRow(
                             title = "Albums",
                             items = snapshot.albums,
-                            onClick = { item ->
-                                if (item.playable) pendingItem = item
-                            },
+                            onClick = openMusicItem,
                         )
                     }
 
@@ -3218,6 +3234,17 @@ private fun MusicHub(
                 }
             }
         }
+        }
+
+        selectedAlbum?.let { album ->
+            MusicAlbumDetail(
+                album = album,
+                onBack = { selectedAlbum = null },
+                onLoadDetails = onLoadAlbumDetails,
+                onSelectPlayback = { item ->
+                    if (item.playable) pendingItem = item
+                },
+            )
         }
 
         pendingItem?.let { item ->
@@ -3344,6 +3371,214 @@ private fun MusicArtistDetail(
                     items = albums,
                     onClick = onAlbumSelected,
                 )
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun MusicAlbumDetail(
+    album: MaMediaItem,
+    onBack: () -> Unit,
+    onLoadDetails: suspend (MaMediaItem) -> MaAlbumDetails,
+    onSelectPlayback: (MaMediaItem) -> Unit,
+) {
+    var details by remember(album.uri) { mutableStateOf<MaAlbumDetails?>(null) }
+    var loading by remember(album.uri) { mutableStateOf(true) }
+    var error by remember(album.uri) { mutableStateOf<String?>(null) }
+    var retry by remember(album.uri) { mutableStateOf(0) }
+
+    LaunchedEffect(album.uri, retry) {
+        loading = true
+        error = null
+        try {
+            details = onLoadDetails(album)
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            error = failure.message ?: "Couldn't load this album's tracks."
+        } finally {
+            loading = false
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF05080C)),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 220.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(21.dp))
+                        .background(Color(0x22FFFFFF))
+                        .clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(
+                        "‹",
+                        style = TextStyle(color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                BasicText(
+                    "Albums",
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 15.sp),
+                )
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(196.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0xFF151A2A))
+                        .border(1.dp, Color(0x665B47D8), RoundedCornerShape(24.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!album.imageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            modifier = Modifier.fillMaxSize(),
+                            url = album.imageUrl,
+                            scaleType = ImageView.ScaleType.CENTER_CROP,
+                        )
+                    } else {
+                        BasicText(
+                            "♫",
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 64.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(15.dp))
+                BasicText(
+                    album.name,
+                    style = TextStyle(color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold),
+                    maxLines = 2,
+                )
+                if (album.subtitle.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    BasicText(
+                        album.subtitle,
+                        style = TextStyle(color = Color(0xFFB6BFCE), fontSize = 14.sp),
+                        maxLines = 2,
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                val metadata = buildList {
+                    add("ALBUM")
+                    details?.releaseYear?.let { add(it.toString()) }
+                    details?.tracks?.size?.let { add(if (it == 1) "1 track" else it.toString() + " tracks") }
+                }.joinToString("  ·  ")
+                BasicText(
+                    metadata,
+                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                )
+                if (album.playable) {
+                    Spacer(Modifier.height(17.dp))
+                    VesperButton("Play album") { onSelectPlayback(album) }
+                }
+            }
+        }
+
+        item {
+            BasicText(
+                "Tracks",
+                style = TextStyle(color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold),
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            )
+        }
+
+        when {
+            loading -> item {
+                BasicText(
+                    "Loading tracks…",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
+                )
+            }
+            error != null -> item {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                    BasicText(
+                        error.orEmpty(),
+                        style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 13.sp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    DarkButton("Try again") { retry += 1 }
+                }
+            }
+            details?.tracks.isNullOrEmpty() -> item {
+                BasicText(
+                    "No tracks found for this album.",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
+                )
+            }
+            else -> {
+                val tracks = details?.tracks.orEmpty()
+                items(tracks) { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = entry.item.playable) { onSelectPlayback(entry.item) }
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val position = if (entry.discNumber > 1) {
+                            entry.discNumber.toString() + "." + entry.trackNumber.toString()
+                        } else if (entry.trackNumber > 0) {
+                            entry.trackNumber.toString()
+                        } else {
+                            "♫"
+                        }
+                        BasicText(
+                            position,
+                            modifier = Modifier.width(40.dp),
+                            style = TextStyle(color = Color(0xFF8F98A5), fontSize = 13.sp),
+                        )
+                        Column(Modifier.weight(1f)) {
+                            BasicText(
+                                entry.item.name,
+                                style = TextStyle(
+                                    color = if (entry.item.playable) Color.White else Color(0xFF7F8793),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                                maxLines = 2,
+                            )
+                            if (entry.item.subtitle.isNotBlank()) {
+                                BasicText(
+                                    entry.item.subtitle,
+                                    style = TextStyle(color = Color(0xFF8F98A5), fontSize = 11.sp),
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                        entry.durationSeconds?.let { seconds ->
+                            val durationText = (seconds / 60).toString() + ":" +
+                                (seconds % 60).toString().padStart(2, '0')
+                            BasicText(
+                                durationText,
+                                style = TextStyle(color = Color(0xFF8F98A5), fontSize = 12.sp),
+                            )
+                        }
+                    }
+                }
             }
         }
     }
