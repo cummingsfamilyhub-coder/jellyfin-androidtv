@@ -1862,6 +1862,7 @@ private fun VesperMobile(
                     onRetry = onRetryMusic,
                     onLoadArtistAlbums = onLoadArtistAlbums,
                     onLoadAlbumDetails = onLoadAlbumDetails,
+                    onSearchMusicLibrary = onMusicLibrarySearch,
                     musicFavourites = musicFavourites,
                     onToggleMusicFavourite = onToggleMusicFavourite,
                     onLoadPlaylistDetails = onLoadPlaylistDetails,
@@ -1945,6 +1946,8 @@ private fun VesperMobile(
                     musicPlayers = musicState.snapshot.players,
                     onPlayMusic = onPlayMusic,
                     onEnqueueMusic = onEnqueueMusic,
+                    musicFavourites = musicFavourites,
+                    onToggleMusicFavourite = onToggleMusicFavourite,
                     onSelect = onSelect,
                     onToggleFavorite = onToggleFavorite,
                     expanded = expanded,
@@ -2001,6 +2004,7 @@ private fun VesperMobile(
                     onClearQueue = onClearMusicQueue,
                     musicFavourites = musicFavourites,
                     onToggleMusicFavourite = onToggleMusicFavourite,
+                    onSearchMusicLibrary = onMusicLibrarySearch,
                     onRooms = { player ->
                         nowPlayingRoomsPlayerId = player.playerId
                     },
@@ -2187,6 +2191,7 @@ private fun VesperNowPlaying(
     onClearQueue: suspend (MaPlayer) -> Boolean,
     musicFavourites: List<MaMediaItem>,
     onToggleMusicFavourite: (MaMediaItem) -> Unit,
+    onSearchMusicLibrary: suspend (String) -> MaSearchResults,
     onRooms: (MaPlayer) -> Unit,
 ) {
     if (players.isEmpty()) return
@@ -2203,6 +2208,7 @@ private fun VesperNowPlaying(
     if (safeIndex != currentIndex) currentIndex = safeIndex
     val player = players[safeIndex]
     var queueOpen by remember(player.queueId) { mutableStateOf(false) }
+    var findCurrentTrack by remember(player.queueId, player.currentTitle) { mutableStateOf(false) }
 
     Popup(
         alignment = Alignment.Center,
@@ -2466,12 +2472,22 @@ private fun VesperNowPlaying(
 
                 Spacer(Modifier.height(largeGap))
 
-                player.currentTrack?.let { track ->
+                val knownTrack = player.currentTrack
+                if (knownTrack != null) {
                     MyVMark(
-                        favorite = musicFavourites.any { it.uri == track.uri },
-                        modifier = Modifier.clickable { onToggleMusicFavourite(track) }
+                        favorite = musicFavourites.any { it.uri == knownTrack.uri },
+                        modifier = Modifier.clickable { onToggleMusicFavourite(knownTrack) }
                             .padding(vertical = 5.dp),
                         withLabel = true,
+                    )
+                    Spacer(Modifier.height(smallGap))
+                } else if (!player.currentTitle.isNullOrBlank()) {
+                    BasicText(
+                        "V+  Find in library to save to MyV",
+                        modifier = Modifier.clickable { findCurrentTrack = true }
+                            .padding(vertical = 5.dp),
+                        style = TextStyle(color = Color(0xFFC4B5FD),
+                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
                     )
                     Spacer(Modifier.height(smallGap))
                 }
@@ -2652,6 +2668,16 @@ private fun VesperNowPlaying(
                 }
             }
             }
+            }
+            if (findCurrentTrack) {
+                MusicFavouriteSearchPopup(
+                    title = "Find this song in MyV",
+                    initialQuery = player.currentTitle.orEmpty(),
+                    onSearch = onSearchMusicLibrary,
+                    favorites = musicFavourites,
+                    onToggle = onToggleMusicFavourite,
+                    onDismiss = { findCurrentTrack = false },
+                )
             }
         }
     }
@@ -3192,6 +3218,7 @@ private fun MusicHub(
     onRetry: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
+    onSearchMusicLibrary: suspend (String) -> MaSearchResults,
     musicFavourites: List<MaMediaItem>,
     onToggleMusicFavourite: (MaMediaItem) -> Unit,
     onLoadPlaylistDetails: suspend (MaMediaItem) -> MaPlaylistDetails,
@@ -3214,6 +3241,7 @@ private fun MusicHub(
     var createPlaylistDialog by remember { mutableStateOf(false) }
     var trackForPlaylist by remember { mutableStateOf<MaMediaItem?>(null) }
     var trackActionsItem by remember { mutableStateOf<MaMediaItem?>(null) }
+    var favoriteSearchOpen by remember { mutableStateOf(false) }
     val musicListState = rememberLazyListState()
     val openMusicItem: (MaMediaItem) -> Unit = { item ->
         when (item.mediaType) {
@@ -3226,9 +3254,10 @@ private fun MusicHub(
 
     BackHandler(enabled = selectedArtist != null || selectedAlbum != null || selectedPlaylist != null ||
         pendingItem != null || createPlaylistDialog ||
-        trackForPlaylist != null || trackActionsItem != null) {
+        trackForPlaylist != null || trackActionsItem != null || favoriteSearchOpen) {
         when {
             pendingItem != null -> pendingItem = null
+            favoriteSearchOpen -> favoriteSearchOpen = false
             trackForPlaylist != null -> trackForPlaylist = null
             trackActionsItem != null -> trackActionsItem = null
             createPlaylistDialog -> createPlaylistDialog = false
@@ -3292,11 +3321,27 @@ private fun MusicHub(
                         )
                     }
 
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            BasicText("MyV · Music",
+                                modifier = Modifier.weight(1f),
+                                style = TextStyle(color = Color.White,
+                                    fontSize = 17.sp, fontWeight = FontWeight.Bold))
+                            DarkButton("Find songs to save") { favoriteSearchOpen = true }
+                        }
+                    }
+
                     if (snapshot.recentlyPlayed.isNotEmpty()) item {
                         MaMediaRow(
                             title = "Recently Played",
                             items = snapshot.recentlyPlayed,
                             onClick = openMusicItem,
+                            favoriteUris = musicFavourites.map { it.uri }.toSet(),
+                            onToggleFavorite = onToggleMusicFavourite,
                         )
                     }
 
@@ -3305,6 +3350,8 @@ private fun MusicHub(
                             title = "Favourite Tracks · MyV",
                             items = musicFavourites,
                             onClick = { track -> if (track.playable) pendingItem = track },
+                            favoriteUris = musicFavourites.map { it.uri }.toSet(),
+                            onToggleFavorite = onToggleMusicFavourite,
                         )
                     }
 
@@ -3401,6 +3448,17 @@ private fun MusicHub(
                     onCreatePlaylist(name)
                     createPlaylistDialog = false
                 },
+            )
+        }
+
+        if (favoriteSearchOpen) {
+            MusicFavouriteSearchPopup(
+                title = "Find songs for MyV",
+                initialQuery = "",
+                onSearch = onSearchMusicLibrary,
+                favorites = musicFavourites,
+                onToggle = onToggleMusicFavourite,
+                onDismiss = { favoriteSearchOpen = false },
             )
         }
 
@@ -3789,6 +3847,150 @@ private fun MusicAlbumDetail(
 }
 
 
+
+
+@Composable
+private fun MusicFavouriteSearchPopup(
+    title: String,
+    initialQuery: String,
+    onSearch: suspend (String) -> MaSearchResults,
+    favorites: List<MaMediaItem>,
+    onToggle: (MaMediaItem) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember(title, initialQuery) { mutableStateOf(initialQuery) }
+    var tracks by remember { mutableStateOf<List<MaMediaItem>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(query) {
+        val trimmed = query.trim()
+        if (trimmed.length < 2) {
+            tracks = emptyList()
+            error = null
+            searching = false
+        } else {
+            delay(350)
+            searching = true
+            error = null
+            try {
+                tracks = onSearch(trimmed).tracks
+                    .filter { it.mediaType == "track" && it.uri.isNotBlank() }
+                    .distinctBy { it.uri }
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+                tracks = emptyList()
+                error = failure.message ?: "Couldn't search Music Assistant."
+            } finally {
+                searching = false
+            }
+        }
+    }
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Column(
+            modifier = Modifier.width(345.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color(0xFF191A25))
+                .border(1.dp, Color(0x554D42A6), RoundedCornerShape(22.dp))
+                .padding(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicText(
+                    title,
+                    modifier = Modifier.weight(1f),
+                    style = TextStyle(color = Color.White,
+                        fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                )
+                BasicText(
+                    "×",
+                    modifier = Modifier.clickable(onClick = onDismiss)
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                    style = TextStyle(color = Color.White, fontSize = 24.sp),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            BasicText(
+                "Search your music library. Choose the actual track to save — playing isn't required.",
+                style = TextStyle(color = Color(0xFF9BA5B2),
+                    fontSize = 12.sp, lineHeight = 16.sp),
+            )
+            Spacer(Modifier.height(12.dp))
+            Box(
+                modifier = Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF101821))
+                    .padding(13.dp),
+            ) {
+                if (query.isEmpty()) {
+                    BasicText(
+                        "Song or artist…",
+                        style = TextStyle(color = Color(0xFF778391), fontSize = 14.sp),
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    cursorBrush = SolidColor(Color(0xFFA98CFF)),
+                    textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                )
+            }
+            Spacer(Modifier.height(9.dp))
+            val message = when {
+                searching -> "Searching music…"
+                error != null -> error.orEmpty()
+                query.trim().length < 2 -> "Type at least two characters."
+                tracks.isEmpty() -> "No matching tracks in Music Assistant. Try a shorter title, or index the song in your library first."
+                else -> "Select a track to add or remove from MyV."
+            }
+            BasicText(
+                message,
+                style = TextStyle(
+                    color = if (error != null) Color(0xFFFFA6A6) else Color(0xFF9BA5B2),
+                    fontSize = 11.sp, lineHeight = 15.sp,
+                ),
+            )
+            Spacer(Modifier.height(7.dp))
+            LazyColumn(modifier = Modifier.height(300.dp)) {
+                items(tracks, key = { it.uri }) { item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF151A26)), contentAlignment = Alignment.Center) {
+                            if (!item.imageUrl.isNullOrBlank()) {
+                                AsyncImage(modifier = Modifier.fillMaxSize(),
+                                    url = item.imageUrl,
+                                    scaleType = ImageView.ScaleType.CENTER_CROP)
+                            } else {
+                                BasicText("♫", style = TextStyle(
+                                    color = Color(0xFFA98CFF), fontSize = 19.sp))
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            BasicText(item.name, maxLines = 2,
+                                style = TextStyle(color = Color.White,
+                                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold))
+                            BasicText(item.subtitle, maxLines = 1,
+                                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 10.sp))
+                        }
+                        MyVMark(
+                            favorite = favorites.any { it.uri == item.uri },
+                            modifier = Modifier.clickable { onToggle(item) }
+                                .padding(horizontal = 7.dp, vertical = 9.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun MusicTrackActionsPopup(
@@ -4485,6 +4687,8 @@ private fun MaMediaRow(
     items: List<MaMediaItem>,
     onClick: (MaMediaItem) -> Unit,
     artistStyle: Boolean = false,
+    favoriteUris: Set<String> = emptySet(),
+    onToggleFavorite: ((MaMediaItem) -> Unit)? = null,
 ) {
     Column(Modifier.padding(top = 10.dp)) {
         BasicText(
@@ -4536,6 +4740,18 @@ private fun MaMediaRow(
                                     fontWeight = FontWeight.Bold,
                                 ),
                             )
+                        }
+                        if (item.mediaType == "track" && onToggleFavorite != null) {
+                            Box(
+                                modifier = Modifier.align(Alignment.TopEnd).padding(5.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xE5141724))
+                                    .clickable { onToggleFavorite(item) }
+                                    .padding(5.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                MyVMark(favorite = item.uri in favoriteUris)
+                            }
                         }
                     }
 
@@ -8066,6 +8282,8 @@ private fun SearchBrowse(
     musicPlayers: List<MaPlayer>,
     onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
     onEnqueueMusic: (MaMediaItem, MaPlayer, Boolean) -> Unit,
+    musicFavourites: List<MaMediaItem>,
+    onToggleMusicFavourite: (MaMediaItem) -> Unit,
     onSelect: (BaseItemDto) -> Unit,
     onToggleFavorite: (BaseItemDto) -> Unit,
     expanded: Boolean,
@@ -8407,6 +8625,10 @@ private fun SearchBrowse(
                             onQueue = {
                                 if (item.playable) pendingQueueMusicItem = item
                             },
+                            isFavorite = item.uri in musicFavourites.map { it.uri }.toSet(),
+                            onToggleFavorite = if (item.mediaType == "track") {
+                                { onToggleMusicFavourite(item) }
+                            } else null,
                         )
                     }
 
@@ -8566,6 +8788,8 @@ private fun SearchMusicLibraryCard(
     item: MaMediaItem,
     onClick: () -> Unit,
     onQueue: () -> Unit,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -8609,6 +8833,19 @@ private fun SearchMusicLibraryCard(
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText("⋮", style = TextStyle(color = Color.White, fontSize = 22.sp))
+            }
+
+            if (item.mediaType == "track" && onToggleFavorite != null) {
+                Box(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xDD171725))
+                        .clickable(onClick = onToggleFavorite)
+                        .padding(7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MyVMark(favorite = isFavorite)
+                }
             }
 
             Box(
