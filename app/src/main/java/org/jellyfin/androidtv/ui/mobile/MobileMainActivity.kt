@@ -1862,6 +1862,8 @@ private fun VesperMobile(
                     onRetry = onRetryMusic,
                     onLoadArtistAlbums = onLoadArtistAlbums,
                     onLoadAlbumDetails = onLoadAlbumDetails,
+                    musicFavourites = musicFavourites,
+                    onToggleMusicFavourite = onToggleMusicFavourite,
                     onLoadPlaylistDetails = onLoadPlaylistDetails,
                     onCreatePlaylist = onCreateMusicPlaylist,
                     onRenamePlaylist = onRenameMusicPlaylist,
@@ -1997,6 +1999,8 @@ private fun VesperMobile(
                     onPlayQueueItem = onPlayMusicQueueItem,
                     onEditQueue = onEditMusicQueue,
                     onClearQueue = onClearMusicQueue,
+                    musicFavourites = musicFavourites,
+                    onToggleMusicFavourite = onToggleMusicFavourite,
                     onRooms = { player ->
                         nowPlayingRoomsPlayerId = player.playerId
                     },
@@ -2181,6 +2185,8 @@ private fun VesperNowPlaying(
     onPlayQueueItem: (MaQueueItem) -> Unit,
     onEditQueue: suspend (MaQueueItem, Int?, Boolean) -> Boolean,
     onClearQueue: suspend (MaPlayer) -> Boolean,
+    musicFavourites: List<MaMediaItem>,
+    onToggleMusicFavourite: (MaMediaItem) -> Unit,
     onRooms: (MaPlayer) -> Unit,
 ) {
     if (players.isEmpty()) return
@@ -2459,6 +2465,16 @@ private fun VesperNowPlaying(
                 }
 
                 Spacer(Modifier.height(largeGap))
+
+                player.currentTrack?.let { track ->
+                    MyVMark(
+                        favorite = musicFavourites.any { it.uri == track.uri },
+                        modifier = Modifier.clickable { onToggleMusicFavourite(track) }
+                            .padding(vertical = 5.dp),
+                        withLabel = true,
+                    )
+                    Spacer(Modifier.height(smallGap))
+                }
 
                 BasicText(
                     player.currentTitle ?: "Nothing playing",
@@ -3176,6 +3192,8 @@ private fun MusicHub(
     onRetry: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
+    musicFavourites: List<MaMediaItem>,
+    onToggleMusicFavourite: (MaMediaItem) -> Unit,
     onLoadPlaylistDetails: suspend (MaMediaItem) -> MaPlaylistDetails,
     onCreatePlaylist: suspend (String) -> Unit,
     onRenamePlaylist: suspend (MaMediaItem, String) -> Unit,
@@ -3282,6 +3300,14 @@ private fun MusicHub(
                         )
                     }
 
+                    if (musicFavourites.isNotEmpty()) item {
+                        MaMediaRow(
+                            title = "Favourite Tracks · MyV",
+                            items = musicFavourites,
+                            onClick = { track -> if (track.playable) pendingItem = track },
+                        )
+                    }
+
                     if (snapshot.albums.isNotEmpty()) item {
                         MaMediaRow(
                             title = "Albums",
@@ -3345,6 +3371,8 @@ private fun MusicHub(
                 onOpenTrackActions = { track ->
                     if (track.mediaType == "track") trackActionsItem = track
                 },
+                favouriteUris = musicFavourites.map { it.uri }.toSet(),
+                onToggleMusicFavourite = onToggleMusicFavourite,
             )
         }
 
@@ -3360,6 +3388,8 @@ private fun MusicHub(
                     if (track.mediaType == "track") trackActionsItem = track
                 },
                 onRenamed = { selectedPlaylist = playlist.copy(name = it) },
+                favouriteUris = musicFavourites.map { it.uri }.toSet(),
+                onToggleMusicFavourite = onToggleMusicFavourite,
             )
         }
 
@@ -3386,6 +3416,11 @@ private fun MusicHub(
                 onSaveToPlaylist = {
                     trackActionsItem = null
                     trackForPlaylist = track
+                },
+                favourite = musicFavourites.any { it.uri == track.uri },
+                onToggleFavourite = {
+                    onToggleMusicFavourite(track)
+                    trackActionsItem = null
                 },
             )
         }
@@ -3539,6 +3574,8 @@ private fun MusicAlbumDetail(
     onLoadDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onSelectPlayback: (MaMediaItem) -> Unit,
     onOpenTrackActions: (MaMediaItem) -> Unit,
+    favouriteUris: Set<String>,
+    onToggleMusicFavourite: (MaMediaItem) -> Unit,
 ) {
     var details by remember(album.uri) { mutableStateOf<MaAlbumDetails?>(null) }
     var loading by remember(album.uri) { mutableStateOf(true) }
@@ -3726,6 +3763,11 @@ private fun MusicAlbumDetail(
                             }
                         }
                         if (entry.item.mediaType == "track") {
+                            MyVMark(
+                                favorite = entry.item.uri in favouriteUris,
+                                modifier = Modifier.clickable { onToggleMusicFavourite(entry.item) }
+                                    .padding(horizontal = 7.dp, vertical = 5.dp),
+                            )
                             BasicText("＋", modifier = Modifier
                                 .clickable { onOpenTrackActions(entry.item) }
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
@@ -3755,6 +3797,8 @@ private fun MusicTrackActionsPopup(
     onDismiss: () -> Unit,
     onEnqueue: (MaPlayer, Boolean) -> Unit,
     onSaveToPlaylist: () -> Unit,
+    favourite: Boolean,
+    onToggleFavourite: () -> Unit,
 ) {
     // null: main menu; true: choose Play Next queue; false: choose Add to Queue destination.
     var chooseQueueForNext by remember(track.uri) { mutableStateOf<Boolean?>(null) }
@@ -3864,6 +3908,18 @@ private fun MusicTrackActionsPopup(
                             style = TextStyle(color = Color(0xFF88909C), fontSize = 11.sp),
                         )
                     }
+                }
+                Spacer(Modifier.height(5.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .clickable(onClick = onToggleFavourite)
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MyVMark(favorite = favourite)
+                    Spacer(Modifier.width(12.dp))
+                    BasicText(if (favourite) "Remove from MyV" else "Add to MyV",
+                        style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold))
                 }
                 Spacer(Modifier.height(5.dp))
                 Column(
@@ -4011,6 +4067,8 @@ private fun MusicPlaylistDetail(
     onPlay: (MaMediaItem) -> Unit,
     onOpenTrackActions: (MaMediaItem) -> Unit,
     onRenamed: (String) -> Unit,
+    favouriteUris: Set<String>,
+    onToggleMusicFavourite: (MaMediaItem) -> Unit,
 ) {
     var details by remember(playlist.uri) { mutableStateOf<MaPlaylistDetails?>(null) }
     var loading by remember(playlist.uri) { mutableStateOf(true) }
@@ -4102,6 +4160,11 @@ private fun MusicPlaylistDetail(
                         }
                     }
                     if (entry.item.mediaType == "track") {
+                        MyVMark(
+                            favorite = entry.item.uri in favouriteUris,
+                            modifier = Modifier.clickable { onToggleMusicFavourite(entry.item) }
+                                .padding(horizontal = 7.dp, vertical = 5.dp),
+                        )
                         BasicText("⋮", modifier = Modifier
                             .clickable { onOpenTrackActions(entry.item) }
                             .padding(horizontal = 10.dp, vertical = 8.dp),
