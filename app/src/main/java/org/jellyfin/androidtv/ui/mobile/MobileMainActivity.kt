@@ -3534,6 +3534,233 @@ private fun MusicHub(
 }
 
 
+
+@Composable
+private fun MusicCategoryBrowser(
+    category: String,
+    onBack: () -> Unit,
+    onLoad: suspend (String) -> List<MaMediaItem>,
+    onSelect: (MaMediaItem) -> Unit,
+    onToggleFavorite: (MaMediaItem) -> Unit,
+    favoriteUris: Set<String>,
+    onNewPlaylist: () -> Unit,
+) {
+    var entries by remember(category) { mutableStateOf<List<MaMediaItem>>(emptyList()) }
+    var loading by remember(category) { mutableStateOf(true) }
+    var error by remember(category) { mutableStateOf<String?>(null) }
+    var retry by remember(category) { mutableStateOf(0) }
+    var genre by remember(category) { mutableStateOf<String?>(null) }
+    var search by remember(category) { mutableStateOf("") }
+    var sort by remember(category) {
+        mutableStateOf(if (category == "Recently Played") "Recent" else "A–Z")
+    }
+
+    LaunchedEffect(category, retry) {
+        loading = true
+        error = null
+        try {
+            entries = onLoad(category)
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            error = failure.message ?: "Couldn't load this collection."
+        } finally {
+            loading = false
+        }
+    }
+    val genres = entries.flatMap { it.genres }.map { it.trim() }
+        .filter { it.isNotBlank() }.distinct().sorted()
+    val visible = entries.filter { entry ->
+        (genre == null || entry.genres.any { it.equals(genre, ignoreCase = true) }) &&
+            (search.isBlank() || entry.name.contains(search.trim(), ignoreCase = true) ||
+                entry.subtitle.contains(search.trim(), ignoreCase = true))
+    }.let { filtered ->
+        when (sort) {
+            "A–Z" -> filtered.sortedBy { it.name.lowercase() }
+            "Z–A" -> filtered.sortedByDescending { it.name.lowercase() }
+            else -> filtered
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(Color(0xFF05080C))) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            VesperButton("‹ Back", onBack)
+            Spacer(Modifier.width(12.dp))
+            BasicText(category, modifier = Modifier.weight(1f),
+                style = TextStyle(color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold))
+            if (category == "Playlists") DarkButton("+ New", onNewPlaylist)
+        }
+        BasicText(
+            if (loading) "Loading…" else visible.size.toString() + " items",
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 3.dp),
+            style = TextStyle(color = Color(0xFF8594A3), fontSize = 12.sp))
+        if (!loading && error == null) {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp)
+                .clip(RoundedCornerShape(12.dp)).background(Color(0xFF101821)).padding(12.dp)) {
+                if (search.isEmpty()) BasicText("Find in " + category,
+                    style = TextStyle(color = Color(0xFF72808F), fontSize = 14.sp))
+                BasicTextField(
+                    value = search, onValueChange = { search = it },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    cursorBrush = SolidColor(Color(0xFFA98CFF)),
+                    textStyle = TextStyle(color = Color.White, fontSize = 14.sp))
+            }
+            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(if (category == "Recently Played") listOf("Recent", "A–Z", "Z–A")
+                    else listOf("A–Z", "Z–A")) { option ->
+                    SortChip(option, sort == option) { sort = option }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            if (genres.isNotEmpty()) {
+                LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item { GenreChip("All genres", genre == null) { genre = null } }
+                    items(genres, key = { it }) { option ->
+                        GenreChip(option, genre == option) {
+                            genre = if (genre == option) null else option
+                        }
+                    }
+                }
+            } else {
+                BasicText("Genre filters appear when Music Assistant provides genre tags.",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    style = TextStyle(color = Color(0xFF768391), fontSize = 11.sp))
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        when {
+            loading -> BasicText("Loading " + category + "…",
+                modifier = Modifier.padding(20.dp),
+                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp))
+            error != null -> Column(Modifier.padding(20.dp)) {
+                BasicText(error.orEmpty(),
+                    style = TextStyle(color = Color(0xFFFFA6A6), fontSize = 13.sp))
+                Spacer(Modifier.height(12.dp))
+                DarkButton("Retry") { retry++ }
+            }
+            visible.isEmpty() -> BasicText("Nothing to show here yet.",
+                modifier = Modifier.padding(20.dp),
+                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp))
+            else -> LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 16.dp, end = 16.dp, top = 9.dp, bottom = 210.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(15.dp),
+            ) {
+                gridItems(visible, key = { it.uri }) { entry ->
+                    Column(Modifier.fillMaxWidth().clickable { onSelect(entry) }) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                                .clip(RoundedCornerShape(if (category == "Artists") 80.dp else 15.dp))
+                                .background(Color(0xFF152034)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            when {
+                                entry.mediaType == "playlist" -> VesperPlaylistArtwork(entry.name)
+                                !entry.imageUrl.isNullOrBlank() -> AsyncImage(
+                                    modifier = Modifier.fillMaxSize(), url = entry.imageUrl,
+                                    scaleType = ImageView.ScaleType.CENTER_CROP)
+                                else -> BasicText(entry.name.take(1).uppercase(),
+                                    style = TextStyle(color = Color(0xFFA98CFF), fontSize = 32.sp))
+                            }
+                            if (entry.mediaType == "track") {
+                                Box(
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(5.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xDD161723))
+                                        .clickable { onToggleFavorite(entry) }.padding(5.dp),
+                                ) {
+                                    MyVMark(favorite = entry.uri in favoriteUris)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(7.dp))
+                        BasicText(entry.name, maxLines = 2,
+                            style = TextStyle(color = Color.White, fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold))
+                        if (entry.subtitle.isNotBlank()) BasicText(entry.subtitle, maxLines = 1,
+                            style = TextStyle(color = Color(0xFF8190A0), fontSize = 11.sp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicRoomsBrowser(
+    players: List<MaPlayer>,
+    onBack: () -> Unit,
+    onOpenPlayer: (MaPlayer) -> Unit,
+) {
+    var filter by remember { mutableStateOf("All") }
+    val visible = when (filter) {
+        "Playing" -> players.filter { it.playbackState == "playing" }
+        "Paused" -> players.filter { it.playbackState == "paused" }
+        "Ready" -> players.filter { it.playbackState !in setOf("playing", "paused") }
+        else -> players
+    }
+    Column(Modifier.fillMaxSize().background(Color(0xFF05080C))) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            VesperButton("‹ Back", onBack)
+            Spacer(Modifier.width(12.dp))
+            BasicText("Rooms",
+                style = TextStyle(color = Color.White, fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold))
+        }
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(listOf("All", "Playing", "Paused", "Ready")) { option ->
+                GenreChip(option, filter == option) { filter = option }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        if (visible.isEmpty()) {
+            BasicText("No rooms match this filter.",
+                modifier = Modifier.padding(20.dp),
+                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 13.sp))
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 18.dp, end = 18.dp, bottom = 210.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                items(visible, key = { it.playerId }) { player ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(Color(0xFF151B27))
+                            .clickable { onOpenPlayer(player) }.padding(15.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicText("♫", style = TextStyle(
+                            color = Color(0xFFA98CFF), fontSize = 22.sp))
+                        Spacer(Modifier.width(14.dp))
+                        Column {
+                            BasicText(player.name, style = TextStyle(
+                                color = Color.White, fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold))
+                            BasicText(
+                                player.currentTitle?.takeIf { it.isNotBlank() }
+                                    ?: player.playbackState.replaceFirstChar { it.uppercase() },
+                                maxLines = 1,
+                                style = TextStyle(color = Color(0xFF8793A2), fontSize = 12.sp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MusicArtistDetail(
     artist: MaMediaItem,
