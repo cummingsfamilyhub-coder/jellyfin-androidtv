@@ -2009,7 +2009,9 @@ private fun VesperMobile(
             }
 
             MobileNavDock(
-                active = tab,
+                active = if (tab == MobileTab.MYV) {
+                    if (myVSection == "Music") MobileTab.MUSIC else MobileTab.VIDEO
+                } else tab,
                 onSelect = openTab,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
