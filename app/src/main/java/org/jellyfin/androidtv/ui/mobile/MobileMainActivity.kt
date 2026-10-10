@@ -210,6 +210,7 @@ class MobileMainActivity : FragmentActivity() {
                 musicState = musicState,
                 musicFavourites = musicFavourites,
                 onToggleMusicFavourite = ::toggleMusicFavourite,
+                onLoadMyVTrackGenres = ::loadMyVTrackGenres,
                 musicConfigured = musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank(),
                 booksState = booksState,
                 booksConfigured = audiobookLibraryUrl.isNotBlank() && audiobookLibraryToken.isNotBlank(),
@@ -843,6 +844,12 @@ class MobileMainActivity : FragmentActivity() {
             } finally {
                 connection.disconnect()
             }
+        }
+
+    private suspend fun loadMyVTrackGenres(item: MaMediaItem): List<String> =
+        withContext(Dispatchers.IO) {
+            if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) emptyList()
+            else MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken).loadTrackGenres(item)
         }
 
     private suspend fun searchMusicLibrary(query: String): MaSearchResults =
@@ -1730,6 +1737,7 @@ private fun VesperMobile(
     musicState: MusicUiState,
     musicFavourites: List<MaMediaItem>,
     onToggleMusicFavourite: (MaMediaItem) -> Unit,
+    onLoadMyVTrackGenres: suspend (MaMediaItem) -> List<String>,
     musicConfigured: Boolean,
     booksState: BooksUiState,
     booksConfigured: Boolean,
@@ -1781,6 +1789,8 @@ private fun VesperMobile(
     onSettings: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(MobileTab.HOME) }
+    var myVSection by remember { mutableStateOf("Video") }
+    var myVReturnTab by remember { mutableStateOf(MobileTab.HOME) }
     var nowPlayingQueueId by remember { mutableStateOf<String?>(null) }
     var nowPlayingRoomsPlayerId by remember { mutableStateOf<String?>(null) }
 
@@ -1810,12 +1820,25 @@ private fun VesperMobile(
         } else {
             BackHandler(enabled = tab != MobileTab.HOME) {
                 tab = when (tab) {
-                    MobileTab.MOVIES, MobileTab.TV, MobileTab.MYV -> MobileTab.VIDEO
+                    MobileTab.MYV -> myVReturnTab
+                    MobileTab.MOVIES, MobileTab.TV -> MobileTab.VIDEO
                     else -> MobileTab.HOME
                 }
             }
 
             val openTab: (MobileTab) -> Unit = { destination ->
+                if (destination == MobileTab.MYV && tab != MobileTab.MYV) {
+                    myVReturnTab = tab
+                    myVSection = when (tab) {
+                        MobileTab.MUSIC -> "Music"
+                        MobileTab.VIDEO, MobileTab.MOVIES, MobileTab.TV -> "Video"
+                        else -> when {
+                            state.myV.isEmpty() && musicFavourites.isNotEmpty() -> "Music"
+                            state.myV.isNotEmpty() && musicFavourites.isEmpty() -> "Video"
+                            else -> myVSection
+                        }
+                    }
+                }
                 tab = destination
                 onTabSelected(destination)
             }
@@ -1863,6 +1886,7 @@ private fun VesperMobile(
                     onLoadArtistAlbums = onLoadArtistAlbums,
                     onLoadAlbumDetails = onLoadAlbumDetails,
                     onSearchMusicLibrary = onMusicLibrarySearch,
+                    onOpenMyV = { openTab(MobileTab.MYV) },
                     musicFavourites = musicFavourites,
                     onToggleMusicFavourite = onToggleMusicFavourite,
                     onLoadPlaylistDetails = onLoadPlaylistDetails,
@@ -1916,6 +1940,9 @@ private fun VesperMobile(
                     videos = state.myV,
                     tracks = musicFavourites,
                     musicPlayers = musicState.snapshot.players,
+                    selectedSection = myVSection,
+                    onSectionChange = { myVSection = it },
+                    onLoadTrackGenres = onLoadMyVTrackGenres,
                     api = api,
                     onSelectVideo = onSelect,
                     onToggleVideo = onToggleFavorite,
@@ -3219,6 +3246,7 @@ private fun MusicHub(
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onSearchMusicLibrary: suspend (String) -> MaSearchResults,
+    onOpenMyV: () -> Unit,
     musicFavourites: List<MaMediaItem>,
     onToggleMusicFavourite: (MaMediaItem) -> Unit,
     onLoadPlaylistDetails: suspend (MaMediaItem) -> MaPlaylistDetails,
@@ -3328,10 +3356,13 @@ private fun MusicHub(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             BasicText("MyV · Music",
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).clickable(onClick = onOpenMyV)
+                                    .padding(vertical = 8.dp),
                                 style = TextStyle(color = Color.White,
                                     fontSize = 17.sp, fontWeight = FontWeight.Bold))
-                            DarkButton("Find songs to save") { favoriteSearchOpen = true }
+                            DarkButton("View MyV") { onOpenMyV() }
+                            Spacer(Modifier.width(8.dp))
+                            DarkButton("Find songs") { favoriteSearchOpen = true }
                         }
                     }
 
@@ -3352,6 +3383,7 @@ private fun MusicHub(
                             onClick = { track -> if (track.playable) pendingItem = track },
                             favoriteUris = musicFavourites.map { it.uri }.toSet(),
                             onToggleFavorite = onToggleMusicFavourite,
+                            onViewAll = onOpenMyV,
                         )
                     }
 
@@ -4689,12 +4721,15 @@ private fun MaMediaRow(
     artistStyle: Boolean = false,
     favoriteUris: Set<String> = emptySet(),
     onToggleFavorite: ((MaMediaItem) -> Unit)? = null,
+    onViewAll: (() -> Unit)? = null,
 ) {
     Column(Modifier.padding(top = 10.dp)) {
         BasicText(
             "$title  ›",
             style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 7.dp),
+            modifier = Modifier
+                .then(if (onViewAll != null) Modifier.clickable(onClick = onViewAll) else Modifier)
+                .padding(horizontal = 20.dp, vertical = 7.dp),
         )
 
         LazyRow(
@@ -8069,9 +8104,16 @@ private fun LibraryBrowse(
     popularityScope: PopularityScope,
     tmdbConfigured: Boolean,
     expanded: Boolean,
+    showVideoTypeFilter: Boolean = false,
 ) {
-    val genres = remember(media) {
-        media
+    var selectedVideoType by remember(title) { mutableStateOf<BaseItemKind?>(null) }
+    val genreMedia = remember(media, selectedVideoType, showVideoTypeFilter) {
+        if (showVideoTypeFilter && selectedVideoType != null) {
+            media.filter { it.type == selectedVideoType }
+        } else media
+    }
+    val genres = remember(genreMedia) {
+        genreMedia
             .flatMap { it.genres.orEmpty() }
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -8081,12 +8123,12 @@ private fun LibraryBrowse(
     var selectedGenre by remember(title, media) { mutableStateOf<String?>(null) }
     var sort by remember(title) { mutableStateOf(LibrarySort.POPULARITY) }
 
-    val filtered = remember(media, selectedGenre) {
+    val filtered = remember(genreMedia, selectedGenre) {
         selectedGenre?.let { genre ->
-            media.filter { item ->
+            genreMedia.filter { item ->
                 item.genres.orEmpty().any { it.equals(genre, ignoreCase = true) }
             }
-        } ?: media
+        } ?: genreMedia
     }
 
     val visibleMedia = remember(filtered, sort, popularity, popularityScope) {
@@ -8110,6 +8152,32 @@ private fun LibraryBrowse(
             )
         }
 
+        if (showVideoTypeFilter && media.isNotEmpty()) {
+            LazyRow(
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item {
+                    GenreChip("All", selectedVideoType == null) {
+                        selectedVideoType = null
+                        selectedGenre = null
+                    }
+                }
+                item {
+                    GenreChip("Movies", selectedVideoType == BaseItemKind.MOVIE) {
+                        selectedVideoType = BaseItemKind.MOVIE
+                        selectedGenre = null
+                    }
+                }
+                item {
+                    GenreChip("TV Shows", selectedVideoType == BaseItemKind.SERIES) {
+                        selectedVideoType = BaseItemKind.SERIES
+                        selectedGenre = null
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
         LazyRow(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
