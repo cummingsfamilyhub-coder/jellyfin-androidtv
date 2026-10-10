@@ -155,6 +155,7 @@ class MobileMainActivity : FragmentActivity() {
     private var audiobookLibraryToken by mutableStateOf("")
     private var popularityScope by mutableStateOf(PopularityScope.GLOBAL)
     private var showPersistentMiniPlayer by mutableStateOf(true)
+    private var musicFavourites by mutableStateOf<List<MaMediaItem>>(emptyList())
     private val hydratedTabs = mutableSetOf<MobileTab>()
     private val loadingTabs = mutableSetOf<MobileTab>()
     private var musicPlayerRefreshInFlight = false
@@ -169,6 +170,9 @@ class MobileMainActivity : FragmentActivity() {
             return
         }
 
+        activeMusicFavouritesProfile()?.let { profile ->
+            musicFavourites = VesperMusicFavoritesStore(this).load(profile)
+        }
         val vesperPreferences = getSharedPreferences("vesper", MODE_PRIVATE)
         tmdbApiKey = vesperPreferences
             .getString("tmdb_api_key", "")
@@ -204,6 +208,8 @@ class MobileMainActivity : FragmentActivity() {
                 popularity = popularity,
                 popularityScope = popularityScope,
                 musicState = musicState,
+                musicFavourites = musicFavourites,
+                onToggleMusicFavourite = ::toggleMusicFavourite,
                 musicConfigured = musicAssistantBaseUrl.isNotBlank() && musicAssistantToken.isNotBlank(),
                 booksState = booksState,
                 booksConfigured = audiobookLibraryUrl.isNotBlank() && audiobookLibraryToken.isNotBlank(),
@@ -635,6 +641,27 @@ class MobileMainActivity : FragmentActivity() {
             )
             if (selected?.id == item.id) selected = updatedItem
         }
+    }
+
+    private fun activeMusicFavouritesProfile(): String? {
+        val server = sessionRepository.currentSession.value?.serverId?.toString() ?: return null
+        val user = userRepository.currentUser.value?.id?.toString() ?: return null
+        return "$server:$user"
+    }
+
+    private fun toggleMusicFavourite(item: MaMediaItem) {
+        val profile = activeMusicFavouritesProfile() ?: return
+        runCatching { VesperMusicFavoritesStore(this).toggle(profile, item) }
+            .onSuccess { updated ->
+                musicFavourites = updated
+                val added = updated.any { it.uri == item.uri }
+                Toast.makeText(this,
+                    if (added) "Added to MyV" else "Removed from MyV",
+                    Toast.LENGTH_SHORT).show()
+            }.onFailure { error ->
+                Toast.makeText(this, error.message ?: "Couldn't save MyV favourite.",
+                    Toast.LENGTH_LONG).show()
+            }
     }
 
     private fun switchProfile() {
@@ -1684,7 +1711,7 @@ private enum class MobileTab(val label: String, val icon: String) {
     BOOKS("Books", "▤"),
     MOVIES("Movies", "▣"),
     TV("TV", "▤"),
-    MYV("MyV", "♥"),
+    MYV("MyV", "V"),
     SEARCH("Search", "⌕"),
 }
 
@@ -1701,6 +1728,8 @@ private fun VesperMobile(
     popularity: PopularityState,
     popularityScope: PopularityScope,
     musicState: MusicUiState,
+    musicFavourites: List<MaMediaItem>,
+    onToggleMusicFavourite: (MaMediaItem) -> Unit,
     musicConfigured: Boolean,
     booksState: BooksUiState,
     booksConfigured: Boolean,
@@ -1880,12 +1909,15 @@ private fun VesperMobile(
                     tmdbConfigured = tmdbConfigured,
                     expanded = expanded,
                 )
-                MobileTab.MYV -> LibraryBrowse(
-                    title = "MyV",
-                    media = state.myV,
+                MobileTab.MYV -> MyVBrowser(
+                    videos = state.myV,
+                    tracks = musicFavourites,
+                    musicPlayers = musicState.snapshot.players,
                     api = api,
-                    onSelect = onSelect,
-                    onToggleFavorite = onToggleFavorite,
+                    onSelectVideo = onSelect,
+                    onToggleVideo = onToggleFavorite,
+                    onToggleMusic = onToggleMusicFavourite,
+                    onPlayMusic = onPlayMusic,
                     popularity = popularity,
                     popularityScope = popularityScope,
                     tmdbConfigured = tmdbConfigured,
@@ -7048,7 +7080,7 @@ private fun HomeQuickAccess(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            item { HomeQuickAccessChip("♥", "MyV", onMyV) }
+            item { HomeQuickAccessChip("V", "MyV", onMyV) }
             item { HomeQuickAccessChip("⌕", "Request", onRequest) }
             item { HomeQuickAccessChip("♫", "Rooms", onRooms) }
             item { HomeQuickAccessChip("⚙", "Settings", onSettings) }
@@ -7438,14 +7470,7 @@ private fun MediaCard(
                         .clickable { onToggleFavorite(item) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    BasicText(
-                        if (item.userData?.isFavorite == true) "♥" else "♡",
-                        style = TextStyle(
-                            color = if (item.userData?.isFavorite == true) Color(0xFFFF4D7A) else Color.White,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                        ),
-                    )
+                    MyVMark(favorite = item.userData?.isFavorite == true)
                 }
             }
 
@@ -9512,14 +9537,7 @@ private fun GridMediaCard(
                     .clickable { onToggleFavorite(item) },
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText(
-                    if (item.userData?.isFavorite == true) "♥" else "♡",
-                    style = TextStyle(
-                        color = if (item.userData?.isFavorite == true) Color(0xFFFF4D7A) else Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                )
+                MyVMark(favorite = item.userData?.isFavorite == true)
             }
         }
 
@@ -9627,6 +9645,171 @@ private fun MobileNavDock(
     }
 }
 
+
+@Composable
+private fun MyVMark(
+    favorite: Boolean,
+    modifier: Modifier = Modifier,
+    withLabel: Boolean = false,
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier.size(24.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(if (favorite) Color(0xFF6C4AE8) else Color(0x22161B28))
+                .border(
+                    1.dp,
+                    if (favorite) Color(0xFFB6A5FF) else Color(0xFF8D95A6),
+                    RoundedCornerShape(7.dp),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                "V",
+                style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Black),
+            )
+            BasicText(
+                if (favorite) "✓" else "+",
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 1.dp),
+                style = TextStyle(
+                    color = if (favorite) Color.White else Color(0xFFC4B5FD),
+                    fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                ),
+            )
+        }
+        if (withLabel) {
+            Spacer(Modifier.width(9.dp))
+            BasicText(
+                if (favorite) "In MyV" else "Add to MyV",
+                style = TextStyle(
+                    color = if (favorite) Color(0xFFC1ACFF) else Color.White,
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MyVBrowser(
+    videos: List<BaseItemDto>,
+    tracks: List<MaMediaItem>,
+    musicPlayers: List<MaPlayer>,
+    api: ApiClient,
+    onSelectVideo: (BaseItemDto) -> Unit,
+    onToggleVideo: (BaseItemDto) -> Unit,
+    onToggleMusic: (MaMediaItem) -> Unit,
+    onPlayMusic: (MaMediaItem, List<MaPlayer>) -> Unit,
+    popularity: PopularityState,
+    popularityScope: PopularityScope,
+    tmdbConfigured: Boolean,
+    expanded: Boolean,
+) {
+    var view by remember { mutableStateOf("Video") }
+    var pendingTrack by remember { mutableStateOf<MaMediaItem?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .padding(start = 20.dp, end = 18.dp, top = 16.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            listOf("Video", "Music").forEach { section ->
+                Box(
+                    modifier = Modifier.clip(RoundedCornerShape(13.dp))
+                        .background(if (view == section) Color(0xFF6951C5) else Color(0xFF171925))
+                        .clickable { view = section }
+                        .padding(horizontal = 22.dp, vertical = 11.dp),
+                ) {
+                    BasicText(section,
+                        style = TextStyle(color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold))
+                }
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            if (view == "Video") {
+                LibraryBrowse(
+                    title = "MyV · Video",
+                    media = videos,
+                    api = api,
+                    onSelect = onSelectVideo,
+                    onToggleFavorite = onToggleVideo,
+                    popularity = popularity,
+                    popularityScope = popularityScope,
+                    tmdbConfigured = tmdbConfigured,
+                    expanded = expanded,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 160.dp),
+                ) {
+                    item {
+                        BasicText(
+                            "MyV · Music",
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 17.dp),
+                            style = TextStyle(color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold),
+                        )
+                    }
+                    if (tracks.isEmpty()) {
+                        item {
+                            BasicText(
+                                "No favourite songs yet. Tap V+ beside a song to save it here.",
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
+                            )
+                        }
+                    } else {
+                        items(tracks, key = { it.uri }) { track ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .clickable { pendingTrack = track }
+                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(11.dp))
+                                        .background(Color(0xFF191A28)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (!track.imageUrl.isNullOrBlank()) {
+                                        AsyncImage(modifier = Modifier.fillMaxSize(), url = track.imageUrl,
+                                            scaleType = ImageView.ScaleType.CENTER_CROP)
+                                    } else {
+                                        BasicText("♫", style = TextStyle(
+                                            color = Color(0xFFA98CFF), fontSize = 22.sp))
+                                    }
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    BasicText(track.name, maxLines = 1,
+                                        style = TextStyle(color = Color.White, fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold))
+                                    BasicText(track.subtitle, maxLines = 1,
+                                        style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 11.sp))
+                                }
+                                MyVMark(favorite = true,
+                                    modifier = Modifier.clickable { onToggleMusic(track) }
+                                        .padding(horizontal = 8.dp, vertical = 8.dp))
+                            }
+                        }
+                    }
+                }
+            }
+            pendingTrack?.let { track ->
+                MusicRoomPicker(
+                    item = track,
+                    players = musicPlayers,
+                    onDismiss = { pendingTrack = null },
+                    onPlay = { selectedPlayers ->
+                        pendingTrack = null
+                        onPlayMusic(track, selectedPlayers)
+                    },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun FavoriteButton(
     favorite: Boolean,
@@ -9640,14 +9823,7 @@ private fun FavoriteButton(
             .padding(horizontal = 15.dp, vertical = 11.dp),
         contentAlignment = Alignment.Center,
     ) {
-        BasicText(
-            if (favorite) "♥ MyV" else "♡ MyV",
-            style = TextStyle(
-                color = if (favorite) Color(0xFFFF4D7A) else Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-            ),
-        )
+        MyVMark(favorite = favorite, withLabel = true)
     }
 }
 
