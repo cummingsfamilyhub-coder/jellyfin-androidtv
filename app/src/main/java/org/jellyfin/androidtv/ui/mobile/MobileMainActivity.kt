@@ -10063,6 +10063,9 @@ private fun MyVBrowser(
     videos: List<BaseItemDto>,
     tracks: List<MaMediaItem>,
     musicPlayers: List<MaPlayer>,
+    selectedSection: String,
+    onSectionChange: (String) -> Unit,
+    onLoadTrackGenres: suspend (MaMediaItem) -> List<String>,
     api: ApiClient,
     onSelectVideo: (BaseItemDto) -> Unit,
     onToggleVideo: (BaseItemDto) -> Unit,
@@ -10073,8 +10076,40 @@ private fun MyVBrowser(
     tmdbConfigured: Boolean,
     expanded: Boolean,
 ) {
-    var view by remember { mutableStateOf("Video") }
     var pendingTrack by remember { mutableStateOf<MaMediaItem?>(null) }
+    var selectedMusicGenre by remember { mutableStateOf<String?>(null) }
+    var fetchedGenres by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+
+    // Existing bookmarks predate stored genre tags. Enrich the screen without
+    // changing bookmark ownership or making up a genre for unmatched tracks.
+    LaunchedEffect(selectedSection, tracks.map { it.uri }) {
+        if (selectedSection == "Music") {
+            for (track in tracks) {
+                if (track.genres.isNotEmpty() || fetchedGenres.containsKey(track.uri)) continue
+                val found = try {
+                    onLoadTrackGenres(track)
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    emptyList()
+                }
+                fetchedGenres = fetchedGenres + (track.uri to found)
+            }
+        }
+    }
+    fun genresOf(track: MaMediaItem): List<String> =
+        track.genres.ifEmpty { fetchedGenres[track.uri].orEmpty() }
+
+    val musicGenres = tracks.flatMap(::genresOf)
+        .map(String::trim).filter(String::isNotBlank).distinct().sorted()
+    val hasUncategorised = tracks.any { genresOf(it).isEmpty() }
+    val filteredTracks = when (val genre = selectedMusicGenre) {
+        null -> tracks
+        "Uncategorised" -> tracks.filter { genresOf(it).isEmpty() }
+        else -> tracks.filter { item ->
+            genresOf(item).any { it.equals(genre, ignoreCase = true) }
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth()
@@ -10084,8 +10119,8 @@ private fun MyVBrowser(
             listOf("Video", "Music").forEach { section ->
                 Box(
                     modifier = Modifier.clip(RoundedCornerShape(13.dp))
-                        .background(if (view == section) Color(0xFF6951C5) else Color(0xFF171925))
-                        .clickable { view = section }
+                        .background(if (selectedSection == section) Color(0xFF6951C5) else Color(0xFF171925))
+                        .clickable { onSectionChange(section) }
                         .padding(horizontal = 22.dp, vertical = 11.dp),
                 ) {
                     BasicText(section,
@@ -10094,7 +10129,7 @@ private fun MyVBrowser(
             }
         }
         Box(Modifier.weight(1f)) {
-            if (view == "Video") {
+            if (selectedSection == "Video") {
                 LibraryBrowse(
                     title = "MyV · Video",
                     media = videos,
@@ -10105,6 +10140,7 @@ private fun MyVBrowser(
                     popularityScope = popularityScope,
                     tmdbConfigured = tmdbConfigured,
                     expanded = expanded,
+                    showVideoTypeFilter = true,
                 )
             } else {
                 LazyColumn(
@@ -10118,6 +10154,43 @@ private fun MyVBrowser(
                             style = TextStyle(color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold),
                         )
                     }
+                    if (tracks.isNotEmpty()) {
+                        item {
+                            LazyRow(
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                item {
+                                    GenreChip(label = "All", selected = selectedMusicGenre == null) {
+                                        selectedMusicGenre = null
+                                    }
+                                }
+                                items(musicGenres, key = { it }) { genre ->
+                                    GenreChip(
+                                        label = genre,
+                                        selected = selectedMusicGenre == genre,
+                                    ) { selectedMusicGenre = if (selectedMusicGenre == genre) null else genre }
+                                }
+                                if (hasUncategorised) item {
+                                    GenreChip(
+                                        label = "Uncategorised",
+                                        selected = selectedMusicGenre == "Uncategorised",
+                                    ) {
+                                        selectedMusicGenre = if (selectedMusicGenre == "Uncategorised") null
+                                            else "Uncategorised"
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            BasicText(
+                                if (selectedMusicGenre == null) "${tracks.size} saved tracks"
+                                else "${filteredTracks.size} tracks · ${selectedMusicGenre}",
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
+                                style = TextStyle(color = Color(0xFF8794A4), fontSize = 12.sp),
+                            )
+                        }
+                    }
                     if (tracks.isEmpty()) {
                         item {
                             BasicText(
@@ -10126,8 +10199,16 @@ private fun MyVBrowser(
                                 style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
                             )
                         }
+                    } else if (filteredTracks.isEmpty()) {
+                        item {
+                            BasicText(
+                                "No favourite tracks in this genre.",
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 14.sp),
+                            )
+                        }
                     } else {
-                        items(tracks, key = { it.uri }) { track ->
+                        items(filteredTracks, key = { it.uri }) { track ->
                             Row(
                                 modifier = Modifier.fillMaxWidth()
                                     .clickable { pendingTrack = track }
