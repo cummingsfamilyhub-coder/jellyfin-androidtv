@@ -53,6 +53,7 @@ internal data class MaPlayer(
     val queueEnded: Boolean,
     val canPrevious: Boolean,
     val canNext: Boolean,
+    val currentTrack: MaMediaItem? = null,
 )
 
 internal data class MaQueueItem(
@@ -709,6 +710,13 @@ internal class MusicAssistantClient(
             ?.let(::normalizeImageUrl)
             ?: queueCurrent?.optJSONObject("image")?.let(::imageUrl)
             ?: queueMedia?.let(::mediaImageUrl)
+        // A parked Music Assistant queue is not necessarily the active Cast song.
+        val currentTrack = listOfNotNull(queueMedia, playerCurrent)
+            .mapNotNull(::parseMediaItem)
+            .firstOrNull { media ->
+                media.mediaType == "track" && currentTitle != null &&
+                    media.name.equals(currentTitle, ignoreCase = true)
+            }
         val isLive = mediaType in setOf("radio", "audio_source")
         val hasPrevious = !isLive && queueIndex != null && queueIndex > 0
         val hasNext = !isLive && queue?.optJSONObject("next_item") != null
@@ -746,6 +754,7 @@ internal class MusicAssistantClient(
             queueEnded = queueEnded,
             canPrevious = hasPrevious,
             canNext = hasNext,
+            currentTrack = currentTrack,
         )
     }
 
