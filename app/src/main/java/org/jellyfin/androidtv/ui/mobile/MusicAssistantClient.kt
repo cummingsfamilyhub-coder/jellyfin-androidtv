@@ -19,6 +19,7 @@ internal data class MaMediaItem(
     val imageUrl: String?,
     val playable: Boolean = true,
     val editable: Boolean = false,
+    val genres: List<String> = emptyList(),
 )
 
 internal data class MaPlayer(
@@ -208,6 +209,33 @@ internal class MusicAssistantClient(
             releaseYear = metadata.optInt("year", 0).takeIf { it > 0 },
             tracks = tracks,
         )
+    }
+
+    fun loadTrackGenres(track: MaMediaItem): List<String> {
+        if (track.mediaType != "track" || track.itemId.isBlank()) return emptyList()
+        val metadata = command(
+            "music/tracks/get_track",
+            JSONObject()
+                .put("item_id", track.itemId)
+                .put("provider_instance_id_or_domain", track.provider),
+        ) as? JSONObject ?: return emptyList()
+        return mediaGenres(metadata)
+    }
+
+    private fun mediaGenres(item: JSONObject): List<String> {
+        val genres = item.optJSONObject("metadata")?.optJSONArray("genres")
+            ?: item.optJSONArray("genres")
+            ?: return emptyList()
+        return buildList {
+            for (index in 0 until genres.length()) {
+                val name = when (val raw = genres.opt(index)) {
+                    is String -> raw.trim()
+                    is JSONObject -> raw.optString("name").trim()
+                    else -> ""
+                }
+                if (name.isNotBlank() && !name.equals("null", ignoreCase = true)) add(name)
+            }
+        }.distinct()
     }
 
     fun loadPlaylistDetails(playlist: MaMediaItem): MaPlaylistDetails {
@@ -621,6 +649,7 @@ internal class MusicAssistantClient(
             imageUrl = mediaImageUrl(json),
             playable = json.optBoolean("is_playable", mediaType != "artist"),
             editable = json.optBoolean("is_editable", false),
+            genres = mediaGenres(json),
         )
     }
 

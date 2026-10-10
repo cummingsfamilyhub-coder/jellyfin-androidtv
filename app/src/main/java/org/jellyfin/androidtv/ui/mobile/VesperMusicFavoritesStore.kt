@@ -31,6 +31,13 @@ internal class VesperMusicFavoritesStore(context: Context) {
                         mediaType = "track",
                         subtitle = obj.optString("artist"),
                         imageUrl = obj.optString("image_url").takeIf { it.isNotBlank() },
+                        genres = obj.optJSONArray("genres")?.let { values ->
+                            buildList {
+                                for (i in 0 until values.length()) {
+                                    values.optString(i).trim().takeIf { it.isNotBlank() }?.let(::add)
+                                }
+                            }
+                        }.orEmpty(),
                     ))
                 }
             }
@@ -59,6 +66,7 @@ internal class VesperMusicFavoritesStore(context: Context) {
                 .put("name", item.name)
                 .put("artist", item.subtitle)
                 .put("image_url", item.imageUrl ?: "")
+                .put("genres", JSONArray(item.genres))
                 .put("match_hint", hint))
         }
         check(prefs.edit().putString("tracks:$profile", values.toString()).commit()) {
