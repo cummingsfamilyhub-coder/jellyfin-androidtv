@@ -1838,6 +1838,7 @@ private fun VesperMobile(
                     onRenamePlaylist = onRenameMusicPlaylist,
                     onAddPlaylistTrack = onAddMusicPlaylistTrack,
                     onRemovePlaylistTrack = onRemoveMusicPlaylistTrack,
+                    onEnqueue = onEnqueueMusic,
                     onPlay = onPlayMusic,
                     onControl = onControlMusic,
                     onUpdateGroup = onUpdateMusicGroup,
@@ -3148,6 +3149,7 @@ private fun MusicHub(
     onRenamePlaylist: suspend (MaMediaItem, String) -> Unit,
     onAddPlaylistTrack: suspend (MaMediaItem, MaMediaItem) -> Unit,
     onRemovePlaylistTrack: suspend (MaMediaItem, Int) -> Unit,
+    onEnqueue: (MaMediaItem, MaPlayer, Boolean) -> Unit,
     onPlay: (MaMediaItem, List<MaPlayer>) -> Unit,
     onControl: (MaPlayer, MusicPlayerAction) -> Unit,
     onUpdateGroup: (MaPlayer, Set<String>) -> Unit,
@@ -3161,6 +3163,7 @@ private fun MusicHub(
     var selectedPlaylist by remember { mutableStateOf<MaMediaItem?>(null) }
     var createPlaylistDialog by remember { mutableStateOf(false) }
     var trackForPlaylist by remember { mutableStateOf<MaMediaItem?>(null) }
+    var trackActionsItem by remember { mutableStateOf<MaMediaItem?>(null) }
     val musicListState = rememberLazyListState()
     val openMusicItem: (MaMediaItem) -> Unit = { item ->
         when (item.mediaType) {
@@ -3172,10 +3175,12 @@ private fun MusicHub(
     }
 
     BackHandler(enabled = selectedArtist != null || selectedAlbum != null || selectedPlaylist != null ||
-        pendingItem != null || createPlaylistDialog || trackForPlaylist != null) {
+        pendingItem != null || createPlaylistDialog ||
+        trackForPlaylist != null || trackActionsItem != null) {
         when {
             pendingItem != null -> pendingItem = null
             trackForPlaylist != null -> trackForPlaylist = null
+            trackActionsItem != null -> trackActionsItem = null
             createPlaylistDialog -> createPlaylistDialog = false
             selectedPlaylist != null -> selectedPlaylist = null
             selectedAlbum != null -> selectedAlbum = null
@@ -3305,8 +3310,8 @@ private fun MusicHub(
                 onSelectPlayback = { item ->
                     if (item.playable) pendingItem = item
                 },
-                onAddTrackToPlaylist = { track ->
-                    if (track.mediaType == "track") trackForPlaylist = track
+                onOpenTrackActions = { track ->
+                    if (track.mediaType == "track") trackActionsItem = track
                 },
             )
         }
@@ -3319,6 +3324,9 @@ private fun MusicHub(
                 onRename = onRenamePlaylist,
                 onRemove = onRemovePlaylistTrack,
                 onPlay = { item -> if (item.playable) pendingItem = item },
+                onOpenTrackActions = { track ->
+                    if (track.mediaType == "track") trackActionsItem = track
+                },
                 onRenamed = { selectedPlaylist = playlist.copy(name = it) },
             )
         }
@@ -3330,6 +3338,22 @@ private fun MusicHub(
                 onSave = { name ->
                     onCreatePlaylist(name)
                     createPlaylistDialog = false
+                },
+            )
+        }
+
+        trackActionsItem?.let { track ->
+            MusicTrackActionsPopup(
+                track = track,
+                sessions = activeMusicSessions(state.snapshot.players),
+                onDismiss = { trackActionsItem = null },
+                onEnqueue = { player, next ->
+                    trackActionsItem = null
+                    onEnqueue(track, player, next)
+                },
+                onSaveToPlaylist = {
+                    trackActionsItem = null
+                    trackForPlaylist = track
                 },
             )
         }
@@ -3482,7 +3506,7 @@ private fun MusicAlbumDetail(
     onBack: () -> Unit,
     onLoadDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onSelectPlayback: (MaMediaItem) -> Unit,
-    onAddTrackToPlaylist: (MaMediaItem) -> Unit,
+    onOpenTrackActions: (MaMediaItem) -> Unit,
 ) {
     var details by remember(album.uri) { mutableStateOf<MaAlbumDetails?>(null) }
     var loading by remember(album.uri) { mutableStateOf(true) }
@@ -3671,7 +3695,7 @@ private fun MusicAlbumDetail(
                         }
                         if (entry.item.mediaType == "track") {
                             BasicText("＋", modifier = Modifier
-                                .clickable { onAddTrackToPlaylist(entry.item) }
+                                .clickable { onOpenTrackActions(entry.item) }
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                                 style = TextStyle(color = Color(0xFFA98CFF), fontSize = 20.sp))
                         }
@@ -3690,6 +3714,163 @@ private fun MusicAlbumDetail(
     }
 }
 
+
+
+@Composable
+private fun MusicTrackActionsPopup(
+    track: MaMediaItem,
+    sessions: List<MaPlayer>,
+    onDismiss: () -> Unit,
+    onEnqueue: (MaPlayer, Boolean) -> Unit,
+    onSaveToPlaylist: () -> Unit,
+) {
+    // null: main menu; true: choose Play Next queue; false: choose Add to Queue destination.
+    var chooseQueueForNext by remember(track.uri) { mutableStateOf<Boolean?>(null) }
+
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .width(345.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color(0xFF191A25))
+                .border(1.dp, Color(0x554D42A6), RoundedCornerShape(22.dp))
+                .padding(18.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF111B2C)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!track.imageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            modifier = Modifier.fillMaxSize(),
+                            url = track.imageUrl,
+                            scaleType = ImageView.ScaleType.CENTER_CROP,
+                        )
+                    } else {
+                        BasicText(
+                            "♫",
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 24.sp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    BasicText(
+                        track.name,
+                        style = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                        maxLines = 2,
+                    )
+                    if (track.subtitle.isNotBlank()) {
+                        BasicText(
+                            track.subtitle,
+                            style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp),
+                            maxLines = 1,
+                        )
+                    }
+                }
+                BasicText(
+                    "×",
+                    modifier = Modifier.clickable(onClick = onDismiss)
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                    style = TextStyle(color = Color(0xFFB4BAC4), fontSize = 27.sp),
+                )
+            }
+            Spacer(Modifier.height(15.dp))
+
+            val mode = chooseQueueForNext
+            if (mode == null) {
+                val queueName = sessions.singleOrNull()?.name
+                val queueAvailable = sessions.isNotEmpty()
+                if (queueAvailable) {
+                    BasicText(
+                        if (queueName != null) "Now playing in $queueName" else
+                            "${sessions.size} active music queues",
+                        modifier = Modifier.padding(bottom = 8.dp),
+                        style = TextStyle(color = Color(0xFFA98CFF), fontSize = 11.sp),
+                        maxLines = 1,
+                    )
+                } else {
+                    BasicText(
+                        "Start music in a room to use the queue.",
+                        modifier = Modifier.padding(bottom = 8.dp),
+                        style = TextStyle(color = Color(0xFF9CA4B0), fontSize = 12.sp),
+                    )
+                }
+                listOf(
+                    Triple("Play Next", "Play immediately after the current track", true),
+                    Triple("Add to Queue", "Play later in the current queue", false),
+                ).forEach { (label, description, next) ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = queueAvailable) {
+                                if (sessions.size == 1) onEnqueue(sessions.first(), next)
+                                else chooseQueueForNext = next
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        BasicText(
+                            label,
+                            style = TextStyle(
+                                color = if (queueAvailable) Color.White else Color(0xFF68707D),
+                                fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                            ),
+                        )
+                        BasicText(
+                            description,
+                            style = TextStyle(color = Color(0xFF88909C), fontSize = 11.sp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(onClick = onSaveToPlaylist)
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                ) {
+                    BasicText(
+                        "Save to Playlist",
+                        style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                    BasicText(
+                        "Choose an existing playlist",
+                        style = TextStyle(color = Color(0xFF88909C), fontSize = 11.sp),
+                    )
+                }
+            } else {
+                BasicText(
+                    if (mode) "Play Next in…" else "Add to Queue in…",
+                    style = TextStyle(color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                )
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.height(220.dp)) {
+                    items(sessions, key = { it.queueId }) { player ->
+                        BasicText(
+                            player.name,
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { onEnqueue(player, mode) }
+                                .padding(horizontal = 12.dp, vertical = 14.dp),
+                            style = TextStyle(color = Color.White, fontSize = 15.sp),
+                        )
+                    }
+                }
+                DarkButton("Back") { chooseQueueForNext = null }
+            }
+        }
+    }
+}
 
 @Composable
 private fun MusicPlaylistNameDialog(
@@ -3796,6 +3977,7 @@ private fun MusicPlaylistDetail(
     onRename: suspend (MaMediaItem, String) -> Unit,
     onRemove: suspend (MaMediaItem, Int) -> Unit,
     onPlay: (MaMediaItem) -> Unit,
+    onOpenTrackActions: (MaMediaItem) -> Unit,
     onRenamed: (String) -> Unit,
 ) {
     var details by remember(playlist.uri) { mutableStateOf<MaPlaylistDetails?>(null) }
@@ -3886,6 +4068,12 @@ private fun MusicPlaylistDetail(
                             BasicText(entry.item.subtitle, maxLines = 1,
                                 style = TextStyle(color = Color(0xFF8F98A5), fontSize = 11.sp))
                         }
+                    }
+                    if (entry.item.mediaType == "track") {
+                        BasicText("⋮", modifier = Modifier
+                            .clickable { onOpenTrackActions(entry.item) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            style = TextStyle(color = Color(0xFFA98CFF), fontSize = 22.sp))
                     }
                     if (details?.editable == true) {
                         BasicText("×", modifier = Modifier
