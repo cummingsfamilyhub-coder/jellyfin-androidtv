@@ -1009,10 +1009,10 @@ class MobileMainActivity : FragmentActivity() {
 
     private suspend fun loadMusicCategoryItems(
         category: String,
-        genreId: Int?,
+        genreIds: List<Int>?,
     ): List<MaMediaItem> = withContext(Dispatchers.IO) {
         MusicAssistantClient(musicAssistantBaseUrl, musicAssistantToken)
-            .loadCategoryItems(category, genreId)
+            .loadCategoryItems(category, genreIds)
     }
 
     private suspend fun loadMusicCategoryGenres(category: String): List<MaGenre> =
@@ -1802,7 +1802,7 @@ private fun VesperMobile(
     onTabSelected: (MobileTab) -> Unit,
     onRetryMusic: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
-    onLoadMusicCategory: suspend (String, Int?) -> List<MaMediaItem>,
+    onLoadMusicCategory: suspend (String, List<Int>?) -> List<MaMediaItem>,
     onLoadMusicGenres: suspend (String) -> List<MaGenre>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onLoadPlaylistDetails: suspend (MaMediaItem) -> MaPlaylistDetails,
@@ -3281,7 +3281,7 @@ private fun MusicHub(
     userAvatarUrl: String?,
     onRetry: () -> Unit,
     onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
-    onLoadCategory: suspend (String, Int?) -> List<MaMediaItem>,
+    onLoadCategory: suspend (String, List<Int>?) -> List<MaMediaItem>,
     onLoadGenres: suspend (String) -> List<MaGenre>,
     onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onSearchMusicLibrary: suspend (String) -> MaSearchResults,
@@ -3566,11 +3566,152 @@ private fun MusicHub(
 
 
 
+
+/**
+ * Presentation-only genre families. The original Music Assistant genre IDs
+ * are retained and queried as a union; no server tags or files are changed.
+ */
+private data class VesperGenreFamily(
+    val label: String,
+    val sourceGenres: List<MaGenre>,
+)
+
+private fun vesperGenreFamilyName(tag: String): String {
+    val name = tag.trim().lowercase()
+    fun matches(vararg terms: String): Boolean = terms.any { name.contains(it) }
+    return when {
+        matches("metal", "punk", "hardcore", "industrial", "grind", "screamo") -> "Metal & Punk"
+        matches("rock", "alternative", "indie", "grunge", "shoegaze", "britpop", "emo") -> "Rock & Alternative"
+        matches("hip hop", "hip-hop", "r&b", "rap", "trap", "soul", "funk", "rhythm and blues") -> "Hip-Hop & R&B"
+        matches("electro", "dance", "disco", "house", "techno", "trance", "edm", "dubstep", "drum and bass", "dnb", "synth") -> "Dance & Electronic"
+        matches("pop") -> "Pop"
+        matches("jazz", "blues", "swing") -> "Jazz & Blues"
+        matches("country", "folk", "acoustic", "americana", "bluegrass", "celtic", "songwriter") -> "Country & Folk"
+        matches("classical", "orches", "composer", "piano", "instrumental", "opera", "guitarist") -> "Classical & Instrumental"
+        matches("world", "reggae", "ska", "latin", "afro", "african", "arabic", "asian", "bollywood", "desi", "reggaeton", "salsa") -> "World & Reggae"
+        matches("soundtrack", "musical", "ost", "score", "broadway", "stage") -> "Soundtracks & Shows"
+        matches("children", "kid", "family", "christmas", "holiday", "nursery", "lullab") -> "Family & Seasonal"
+        matches("ambient", "chill", "relax", "meditat", "sleep", "lounge", "new age", "easy listening") -> "Chill & Ambient"
+        else -> "Other"
+    }
+}
+
+private fun vesperGenreFamilies(genres: List<MaGenre>): List<VesperGenreFamily> {
+    val groups = genres.distinctBy { it.id }.groupBy { vesperGenreFamilyName(it.name) }
+    val order = listOf(
+        "Rock & Alternative", "Pop", "Hip-Hop & R&B", "Dance & Electronic",
+        "Metal & Punk", "Jazz & Blues", "Country & Folk", "Classical & Instrumental",
+        "World & Reggae", "Soundtracks & Shows", "Chill & Ambient",
+        "Family & Seasonal", "Other",
+    )
+    return order.mapNotNull { name ->
+        groups[name]?.takeIf { it.isNotEmpty() }?.let { VesperGenreFamily(name, it) }
+    }
+}
+
+private fun vesperGenreAccent(label: String): Color = when (label) {
+    "Rock & Alternative" -> Color(0xFFF04B60)
+    "Pop" -> Color(0xFFC58CFF)
+    "Hip-Hop & R&B" -> Color(0xFFFFA54B)
+    "Dance & Electronic" -> Color(0xFF38BDF8)
+    "Metal & Punk" -> Color(0xFF8E68F8)
+    "Jazz & Blues" -> Color(0xFF60A5FA)
+    "Country & Folk" -> Color(0xFF5CD8B7)
+    "Classical & Instrumental" -> Color(0xFFF4CC65)
+    "World & Reggae" -> Color(0xFF5EC96A)
+    "Soundtracks & Shows" -> Color(0xFFEB86C6)
+    "Chill & Ambient" -> Color(0xFF95BEFF)
+    "Family & Seasonal" -> Color(0xFFF9CF52)
+    else -> Color(0xFF9299A6)
+}
+
+@Composable
+private fun VesperGenrePicker(
+    groups: List<VesperGenreFamily>,
+    selected: String?,
+    onChoose: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Column(
+            modifier = Modifier.width(352.dp).height(538.dp)
+                .clip(RoundedCornerShape(23.dp))
+                .background(Color(0xFF171922))
+                .border(1.dp, Color(0x554D42A6), RoundedCornerShape(23.dp))
+                .padding(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    BasicText("Browse genres",
+                        style = TextStyle(color = Color.White, fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold))
+                    BasicText("A simpler view of your library's genres",
+                        style = TextStyle(color = Color(0xFF99A1AE), fontSize = 11.sp))
+                }
+                BasicText("×",
+                    modifier = Modifier.clickable(onClick = onDismiss)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    style = TextStyle(color = Color.White, fontSize = 27.sp))
+            }
+            Spacer(Modifier.height(15.dp))
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.weight(1f),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                item(span = { GridItemSpan(2) }) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(65.dp)
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(if (selected == null) Color(0xFF453679) else Color(0xFF282B36))
+                            .clickable { onChoose(null) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.width(6.dp).height(65.dp).background(Color(0xFFA98CFF)))
+                        BasicText("All music",
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            style = TextStyle(color = Color.White, fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold))
+                    }
+                }
+                gridItems(groups, key = { it.label }) { group ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(85.dp)
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(
+                                if (selected == group.label) Color(0xFF453679)
+                                else Color(0xFF282B36))
+                            .clickable { onChoose(group.label) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier.width(5.dp).height(85.dp)
+                                .background(vesperGenreAccent(group.label)))
+                        BasicText(
+                            group.label,
+                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                            maxLines = 2,
+                            style = TextStyle(
+                                color = Color.White, fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold, lineHeight = 16.sp))
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MusicCategoryBrowser(
     category: String,
     onBack: () -> Unit,
-    onLoad: suspend (String, Int?) -> List<MaMediaItem>,
+    onLoad: suspend (String, List<Int>?) -> List<MaMediaItem>,
     onLoadGenres: suspend (String) -> List<MaGenre>,
     onSelect: (MaMediaItem) -> Unit,
     onToggleFavorite: (MaMediaItem) -> Unit,
@@ -3581,7 +3722,8 @@ private fun MusicCategoryBrowser(
     var loading by remember(category) { mutableStateOf(true) }
     var error by remember(category) { mutableStateOf<String?>(null) }
     var retry by remember(category) { mutableStateOf(0) }
-    var genre by remember(category) { mutableStateOf<MaGenre?>(null) }
+    var selectedGenreFamily by remember(category) { mutableStateOf<String?>(null) }
+    var showGenrePicker by remember(category) { mutableStateOf(false) }
     var genreChoices by remember(category) { mutableStateOf<List<MaGenre>>(emptyList()) }
     var genreError by remember(category) { mutableStateOf<String?>(null) }
     var search by remember(category) { mutableStateOf("") }
@@ -3601,11 +3743,25 @@ private fun MusicCategoryBrowser(
             }
         }
     }
-    LaunchedEffect(category, retry, genre?.id) {
+    val historyGenres = if (category == "Recently Played") {
+        entries.flatMap { it.genres }.map { it.trim() }
+            .filter { it.isNotBlank() }.distinct().sorted()
+    } else emptyList()
+    val genres = if (category == "Recently Played") {
+        historyGenres.mapIndexed { index, name -> MaGenre(index, name) }
+    } else genreChoices
+    val families = vesperGenreFamilies(genres)
+    val selectedGroup = families.firstOrNull { it.label == selectedGenreFamily }
+
+    LaunchedEffect(category, retry, selectedGenreFamily) {
         loading = true
         error = null
         try {
-            entries = onLoad(category, genre?.id)
+            // Multiple source genres are passed to Music Assistant as a union.
+            // History remains locally filtered; its API doesn't support genres.
+            val ids = if (category == "Recently Played") null
+                else selectedGroup?.sourceGenres?.map { it.id }
+            entries = onLoad(category, ids)
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
             error = failure.message ?: "Couldn't load this collection."
@@ -3613,15 +3769,14 @@ private fun MusicCategoryBrowser(
             loading = false
         }
     }
-    // History contains mixed media, and its endpoint doesn't accept a genre
-    // argument. Only use genres that appear on the history items themselves.
-    val historyGenres = if (category == "Recently Played") {
-        entries.flatMap { it.genres }.map { it.trim() }
-            .filter { it.isNotBlank() }.distinct().sorted()
-    } else emptyList()
+    // History contains mixed media, so filter it only by its own real tags.
     val visible = entries.filter { entry ->
-        (category != "Recently Played" || genre == null ||
-            entry.genres.any { it.equals(genre?.name, ignoreCase = true) }) &&
+        (category != "Recently Played" || selectedGenreFamily == null ||
+            entry.genres.any { actual ->
+                selectedGroup?.sourceGenres?.any {
+                    it.name.equals(actual, ignoreCase = true)
+                } == true
+            }) &&
             (search.isBlank() || entry.name.contains(search.trim(), ignoreCase = true) ||
                 entry.subtitle.contains(search.trim(), ignoreCase = true))
     }.let { filtered ->
@@ -3664,24 +3819,27 @@ private fun MusicCategoryBrowser(
                 }
             }
             Spacer(Modifier.height(10.dp))
-            val genres = if (category == "Recently Played") {
-                historyGenres.mapIndexed { index, name -> MaGenre(index, name) }
-            } else genreChoices
-            if (genres.isNotEmpty()) {
-                LazyRow(
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+            if (families.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    item { GenreChip("All genres", genre == null) { genre = null } }
-                    items(genres, key = { it.id }) { option ->
-                        GenreChip(option.name, genre?.id == option.id) {
-                            genre = if (genre?.id == option.id) null else option
+                    DarkButton("Genres  ▾") { showGenrePicker = true }
+                    if (selectedGenreFamily != null) {
+                        GenreChip(selectedGenreFamily.orEmpty(), selected = true) {
+                            selectedGenreFamily = null
                         }
+                    } else {
+                        BasicText(
+                            "${families.size} groups",
+                            style = TextStyle(color = Color(0xFF858F9F), fontSize = 11.sp))
                     }
                 }
-            } else {
+            } else if (genreError != null) {
                 BasicText(
-                    genreError ?: "No indexed music genres for this category yet.",
+                    genreError.orEmpty(),
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                     style = TextStyle(color = Color(0xFF768391), fontSize = 11.sp))
             }
@@ -3745,6 +3903,14 @@ private fun MusicCategoryBrowser(
                 }
             }
         }
+    }
+    if (showGenrePicker && families.isNotEmpty()) {
+        VesperGenrePicker(
+            groups = families,
+            selected = selectedGenreFamily,
+            onChoose = { selectedGenreFamily = it; showGenrePicker = false },
+            onDismiss = { showGenrePicker = false },
+        )
     }
 }
 
