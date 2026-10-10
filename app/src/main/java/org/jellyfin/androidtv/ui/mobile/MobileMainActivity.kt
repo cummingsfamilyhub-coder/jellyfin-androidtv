@@ -3491,7 +3491,7 @@ private fun MusicAlbumDetail(
                 )
                 if (album.playable) {
                     Spacer(Modifier.height(17.dp))
-                    VesperButton("Play album") { onSelectPlayback(album) }
+                    VesperButton("Play album", { onSelectPlayback(album) })
                 }
             }
         }
