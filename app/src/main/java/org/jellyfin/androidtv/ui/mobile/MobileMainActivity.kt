@@ -474,7 +474,7 @@ class MobileMainActivity : FragmentActivity() {
             try {
                 api.itemsApi.getItems(
                     fields = ItemRepository.browseFields,
-                    includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                    includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES, BaseItemKind.EPISODE),
                     recursive = true,
                     imageTypeLimit = 1,
                     limit = 100,
@@ -680,7 +680,11 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun toggleMusicFavourite(item: MaMediaItem) {
-        val profile = activeMusicFavouritesProfile() ?: return
+        val profile = activeMusicFavouritesProfile()
+        if (profile == null) {
+            Toast.makeText(this, "Select a Vesper profile before saving to MyV.", Toast.LENGTH_LONG).show()
+            return
+        }
         runCatching { VesperMusicFavoritesStore(this).toggle(profile, item) }
             .onSuccess { updated ->
                 musicFavourites = updated
@@ -1166,7 +1170,10 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun playMusic(item: MaMediaItem, players: List<MaPlayer>) {
-        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank() || players.isEmpty()) return
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank() || players.isEmpty()) {
+            Toast.makeText(this, "Connect Music Assistant and choose a player first.", Toast.LENGTH_LONG).show()
+            return
+        }
 
         lifecycleScope.launch {
             runCatching {
@@ -1210,7 +1217,10 @@ class MobileMainActivity : FragmentActivity() {
     }
 
     private fun enqueueMusic(item: MaMediaItem, player: MaPlayer, next: Boolean) {
-        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) return
+        if (musicAssistantBaseUrl.isBlank() || musicAssistantToken.isBlank()) {
+            Toast.makeText(this, "Connect Music Assistant in Settings to use the queue.", Toast.LENGTH_LONG).show()
+            return
+        }
         lifecycleScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -2012,6 +2022,8 @@ private fun VesperMobile(
                     onVideoRequestSearch = onSeerrSearch,
                     onVideoRequest = onSeerrRequest,
                     onMusicLibrarySearch = onMusicLibrarySearch,
+                    onLoadArtistAlbums = onLoadArtistAlbums,
+                    onLoadAlbumDetails = onLoadAlbumDetails,
                     onMusicRequestSearch = onMusicRequestSearch,
                     onMusicRequest = onMusicRequest,
                     onBookLibrarySearch = onBookLibrarySearch,
@@ -3874,7 +3886,7 @@ private fun MusicCategoryBrowser(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 16.dp, end = 16.dp, top = 9.dp, bottom = 210.dp),
+                    start = 16.dp, end = 16.dp, top = 9.dp, bottom = 220.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(15.dp),
             ) {
@@ -8556,7 +8568,7 @@ private fun CollectionBrowser(
                     start = 16.dp,
                     end = 16.dp,
                     top = 4.dp,
-                    bottom = 24.dp,
+                    bottom = 220.dp,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(11.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -8730,7 +8742,7 @@ private fun LibraryBrowse(
                     start = 16.dp,
                     end = 16.dp,
                     top = 8.dp,
-                    bottom = 118.dp,
+                    bottom = 220.dp,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(11.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -8818,6 +8830,8 @@ private fun SearchBrowse(
     onVideoRequestSearch: suspend (String) -> List<SeerrSearchResult>,
     onVideoRequest: suspend (SeerrSearchResult) -> String?,
     onMusicLibrarySearch: suspend (String) -> MaSearchResults,
+    onLoadArtistAlbums: suspend (MaMediaItem) -> List<MaMediaItem>,
+    onLoadAlbumDetails: suspend (MaMediaItem) -> MaAlbumDetails,
     onMusicRequestSearch: suspend (String) -> List<VesperMusicRequestResult>,
     onMusicRequest: suspend (VesperMusicRequestResult) -> String?,
     onBookLibrarySearch: suspend (String) -> List<VesperBookLibraryResult>,
@@ -8858,6 +8872,8 @@ private fun SearchBrowse(
     var selectedBookRequest by remember { mutableStateOf<VesperBookRequestResult?>(null) }
     var pendingMusicItem by remember { mutableStateOf<MaMediaItem?>(null) }
     var pendingQueueMusicItem by remember { mutableStateOf<MaMediaItem?>(null) }
+    var selectedSearchArtist by remember { mutableStateOf<MaMediaItem?>(null) }
+    var selectedSearchAlbum by remember { mutableStateOf<MaMediaItem?>(null) }
 
     val cleanQuery = query.trim()
     val fallbackVideo = remember(state) {
@@ -9122,6 +9138,11 @@ private fun SearchBrowse(
                         )
                     }
 
+                    if (visibleVideoLibrary.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SearchResultGroupLabel("Already in your library")
+                        }
+                    }
                     gridItems(
                         visibleVideoLibrary.take(allLimit),
                         key = { "video-local-${it.id}" },
@@ -9129,6 +9150,11 @@ private fun SearchBrowse(
                         GridMediaCard(item, api, onSelect, onToggleFavorite)
                     }
 
+                    if (visibleVideoRequests.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SearchResultGroupLabel("Available to request")
+                        }
+                    }
                     gridItems(
                         visibleVideoRequests.take(allLimit),
                         key = { "video-request-${it.mediaType}-${it.tmdbId}" },
@@ -9157,6 +9183,11 @@ private fun SearchBrowse(
                         )
                     }
 
+                    if (musicLibrary.all.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SearchResultGroupLabel("Already in your library")
+                        }
+                    }
                     gridItems(
                         musicLibrary.all.take(allLimit),
                         key = { "music-local-${it.uri}" },
@@ -9164,7 +9195,11 @@ private fun SearchBrowse(
                         SearchMusicLibraryCard(
                             item = item,
                             onClick = {
-                                if (item.playable) pendingMusicItem = item
+                                when (item.mediaType) {
+                                    "artist" -> selectedSearchArtist = item
+                                    "album" -> selectedSearchAlbum = item
+                                    else -> if (item.playable) pendingMusicItem = item
+                                }
                             },
                             onQueue = {
                                 if (item.playable) pendingQueueMusicItem = item
@@ -9176,6 +9211,11 @@ private fun SearchBrowse(
                         )
                     }
 
+                    if (visibleMusicRequests.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SearchResultGroupLabel("Available to request")
+                        }
+                    }
                     gridItems(
                         visibleMusicRequests.take(allLimit),
                         key = { "music-request-${it.albumMbid}" },
@@ -9202,6 +9242,11 @@ private fun SearchBrowse(
                         )
                     }
 
+                    if (bookLibrary.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SearchResultGroupLabel("Already in your library")
+                        }
+                    }
                     gridItems(
                         bookLibrary.take(allLimit),
                         key = { "book-local-${it.itemId}" },
@@ -9209,6 +9254,11 @@ private fun SearchBrowse(
                         SearchBookLibraryCard(item)
                     }
 
+                    if (visibleBookRequests.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            SearchResultGroupLabel("Available to request")
+                        }
+                    }
                     gridItems(
                         visibleBookRequests.take(allLimit),
                         key = { "book-request-${it.bookId}" },
@@ -9247,6 +9297,34 @@ private fun SearchBrowse(
             onDismiss = { selectedBookRequest = null },
             onRequest = onBookRequest,
             onRequested = { booksRefresh++ },
+        )
+    }
+
+    BackHandler(enabled = selectedSearchArtist != null || selectedSearchAlbum != null) {
+        if (selectedSearchAlbum != null) selectedSearchAlbum = null
+        else selectedSearchArtist = null
+    }
+    selectedSearchArtist?.let { artist ->
+        MusicArtistDetail(
+            artist = artist,
+            onBack = { selectedSearchArtist = null },
+            onLoadAlbums = onLoadArtistAlbums,
+            onAlbumSelected = { selectedSearchAlbum = it },
+        )
+    }
+    selectedSearchAlbum?.let { album ->
+        MusicAlbumDetail(
+            album = album,
+            onBack = { selectedSearchAlbum = null },
+            onLoadDetails = onLoadAlbumDetails,
+            onSelectPlayback = { track ->
+                if (track.playable) pendingMusicItem = track
+            },
+            onOpenTrackActions = { track ->
+                if (track.playable) pendingQueueMusicItem = track
+            },
+            favouriteUris = musicFavourites.map { it.uri }.toSet(),
+            onToggleMusicFavourite = onToggleMusicFavourite,
         )
     }
 
@@ -9328,6 +9406,19 @@ private fun SearchSectionHeader(
 }
 
 @Composable
+private fun SearchResultGroupLabel(label: String) {
+    BasicText(
+        label,
+        modifier = Modifier.fillMaxWidth().padding(start = 2.dp, top = 8.dp, bottom = 2.dp),
+        style = TextStyle(
+            color = Color(0xFFABC1D3),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        ),
+    )
+}
+
+@Composable
 private fun SearchMusicLibraryCard(
     item: MaMediaItem,
     onClick: () -> Unit,
@@ -9338,7 +9429,10 @@ private fun SearchMusicLibraryCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = item.playable, onClick = onClick),
+            .clickable(
+                enabled = item.playable || item.mediaType == "artist" || item.mediaType == "album",
+                onClick = onClick,
+            ),
     ) {
         Box(
             modifier = Modifier
@@ -10686,7 +10780,7 @@ private fun MyVBrowser(
                             columns = GridCells.Fixed(if (expanded) 5 else 3),
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                start = 16.dp, end = 16.dp, top = 8.dp, bottom = 160.dp),
+                                start = 16.dp, end = 16.dp, top = 8.dp, bottom = 220.dp),
                             horizontalArrangement = Arrangement.spacedBy(11.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
