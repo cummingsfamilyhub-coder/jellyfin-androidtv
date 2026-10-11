@@ -3,7 +3,28 @@
 Last updated: 2026-10-11
 Active branch: `vesper-mobile-vnext`
 Base branch: `vesper`
-Draft PR: #1 — Vesper mobile vNext shell
+Historical PR: #1 (closed) — Vesper mobile vNext shell
+
+## CURRENT WORKING STATUS — 2026-10-11
+
+**Active phase:** Phase 0 — baseline, security inventory, performance measurements and rollback plan. The next action is a **read-only audit**, not a new feature or NAS deployment.
+
+**Project entry point:** [VESPER_PROJECT.md](VESPER_PROJECT.md). The ChatGPT Project instructions are [PROJECT_INSTRUCTIONS.md](PROJECT_INSTRUCTIONS.md). Phase plan: [docs/VESPER_ROADMAP.md](docs/VESPER_ROADMAP.md). Technical architecture, security, delivery, regression tests and decisions are linked from the project entry point.
+
+**Release state (do not collapse these):**
+- Last independently identified user-tested source baseline: `21d6866` for video controls and grouped music genres.
+- Latest functionality changes committed: `302529e` (search drill-down, episode search, display/scroll and action-feedback fixes).
+- Current screenshots show Vesper working, but **the installed APK commit is not verified** by the screenshots alone.
+- CI, release target SHA and installed-source equivalence for `302529e` remain **unverified** in this handover. Verify each against GitHub Actions/release metadata before providing an update as tested.
+- Later documentation-only commits do not imply a rebuilt APK.
+
+**Product direction agreed:** NAS-first shared settings, API keys, MyV music favourites and gateway; native Android UI/playback, bounded local caches, device authentication and future offline media. Do not turn Vesper into a remote WebView or compromise performance. Do not buy an SSD without measurements.
+
+**Phase 0 definition of done:** dated inventory of repo/NAS/device data ownership and credential exposure; actual Wi-Fi/5G baseline; recoverable backups and APK/signing rollback design; proposed gateway security/session boundaries; user review. No destructive changes.
+
+**Keep working:** Jellyfin browse/playback, services and collections, Seerr, Music Assistant This Device and other players, profiles, MyV, genre picker and the familiar Vesper visual design.
+
+---
 
 ## Source of truth
 
