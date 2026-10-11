@@ -1,6 +1,6 @@
 # VESPER_STATUS.md
 
-Last updated: 2026-10-04
+Last updated: 2026-10-11
 Active branch: `vesper-mobile-vnext`
 Base branch: `vesper`
 Draft PR: #1 — Vesper mobile vNext shell
@@ -10,6 +10,39 @@ Draft PR: #1 — Vesper mobile vNext shell
 This file is the hand-off point for future Vesper sessions.
 
 Do not rebuild or redesign Vesper. Inspect the current branch first, then continue from the state below.
+
+## 2026-10-11 — Search & Stability update (awaiting APK verification)
+
+The latest user-tested APK before these changes is commit `21d6866`:
+video Resume/More Info sizes and compact MyV control, and the grouped
+Music Artists genre selector were confirmed working. **Preserve them.**
+
+Source commit `302529e8a6988520ae20ed564cc92f1b1dc046d4` on
+`vesper-mobile-vnext` adds:
+- Jellyfin unified search for individual episodes alongside films and series;
+- separate "Already in your library" vs "Available to request" result headings
+  for video, music and books/audiobooks;
+- artist and album detail navigation directly from music search results,
+  reusing existing artist/album detail screens;
+- consistent scroll clearance beneath the persistent mini-player and nav;
+- explicit user-facing errors where MyV/music playback/queue setup was
+  previously missing and calls silently returned.
+
+**CI not yet verified** at the time of this note. The dedicated
+`vesper-mobile-build.yml` is push-triggered for app changes and publishes
+`vesper-mobile-latest` only after build/signing verification passes.
+Before supplying or installing an APK, check GitHub Actions results and
+confirm the rolling release points at commit `302529e` (or a later
+reviewed build). Do not uninstall the current working APK.
+
+Post-build smoke tests:
+1. Search for a movie, series episode, artist and album; verify direct
+   detail navigation and working Back.
+2. Verify owned vs requestable results are clearly separated.
+3. Scroll to the very last artist, movie, episode and MyV item with
+   persistent music playback active.
+4. Confirm MyV and queue success/failure feedback, music controls,
+   existing grouped genre picker, Collections and profile switching.
 
 ## Known-good Vesper state
 
