@@ -1,4 +1,33 @@
-# Vesper roadmap and release gates
+# Vesper 2 — current design-led roadmap (12 October 2026)
+
+**This section supersedes the V1 migration sequence below.** V2 is a new app, V1 remains working and unchanged. No V2 repo/gateway/service is deployed.
+
+## Gate A — Product and UX (ACTIVE)
+- Finalise MyV-first navigation with collapsible sidebar, six content domains and Live TV uncommitted.
+- Low-fidelity wireframes for MyV, sidebar open/closed, Watch, Listen, Read and Search across phone/foldable/TV.
+- Define content hierarchy, personalisation, mini-player/reader/player interactions and empty/loading states.
+**Done:** User approves screen map, core flows and initial visual behaviour. Do not code yet.
+
+## Gate B — Architecture from the approved design
+- Decide code/toolkit, shared domain models, NAS Gateway and storage, identities/tokens, integration adapters, offline/cache contract, TV layouts and backup/recovery.
+- Reference V1 learnings; avoid inherited monolith, direct client API secrets and new monolithic screen controllers.
+**Done:** API/security boundaries, navigation/data flows, component model and benchmark targets reviewed.
+
+## Gate C — Small end-to-end proof
+- Create new V2 repo/package only after Gates A/B.
+- Secure sign-in, personalised MyV shell, Jellyfin movies list, details and reliable resume playback, Wi-Fi/5G.
+- Preserve V1 untouched; compare metrics and usability with V1.
+**Done:** Installable V2 APK, tests, clear fallback and verified working vertical slice.
+
+## Gate D — Media breadth, then offline
+- Extend Watch to TV, Listen to music/audiobooks/podcasts, Read to ebooks, shared MyV/profiles/search, then offline per media with real device tests.
+- Gate each feature end-to-end before the next; do not introduce Live TV unless explicitly decided.
+**Done:** Feature-specific regression and performance targets pass.
+
+---
+
+## V1 historical migration plan (no longer the active project)
+# Vesper roadmap and release gates — V1 historical plan
 
 Updated 2026-10-11. **One active phase at a time.** New functionality is frozen until the foundations are sound. Phase completion requires verified evidence, not a reassuring commit message.
 
