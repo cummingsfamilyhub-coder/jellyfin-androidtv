@@ -1,11 +1,20 @@
 # VESPER_STATUS.md
 
-Last updated: 2026-10-11
+Last updated: 2026-10-12
 Active branch: `vesper-mobile-vnext`
 Base branch: `vesper`
 Historical PR: #1 (closed) — Vesper mobile vNext shell
 
-## CURRENT WORKING STATUS — 2026-10-11
+
+## CURRENT DIRECTION — 2026-10-12: VESPER 2 GREENFIELD DESIGN
+
+This direction **supersedes Vesper 1 incremental refactor/gateway-first delivery**. The user has explicitly chosen a **new Vesper application codebase**, while preserving Vesper 1 untouched as a working reference and reusing the existing NAS media servers.
+
+Read [docs/VESPER_V2_PRODUCT.md](docs/VESPER_V2_PRODUCT.md) FIRST. Product has six first-class domains: Movies, TV, Music, Audiobooks, Podcasts and eBooks; optional Live TV **undecided**. The personalised, unified **MyV IS the Home screen**, with top-level **MyV / Watch / Listen / Read**, global search/profile in the header and a collapsible sidebar (no permanent bottom tray). Minimalist visual density and user-centred MyV matter more than adding more navigation.
+
+**Current stage: product/experience design, not code.** Next deliverable: screen map plus low-fidelity wireframes for MyV/sidebar, Watch, Listen, Read and Search, checked on phone, foldable and TV. Do not create a replacement repo, deploy gateway or rewrite source before design/architecture approvals. Existing V1 historical release notes below remain useful evidence but are NOT current implementation instructions.
+
+## HISTORICAL VESPER 1 WORKING STATUS — 2026-10-11
 
 **Active phase:** Phase 0 — baseline, security inventory, performance measurements and rollback plan. The next action is a **read-only audit**, not a new feature or NAS deployment.
 
@@ -30,7 +39,7 @@ Historical PR: #1 (closed) — Vesper mobile vNext shell
 
 This file is the hand-off point for future Vesper sessions.
 
-Do not rebuild or redesign Vesper. Inspect the current branch first, then continue from the state below.
+Do not modify or uninstall Vesper 1; use it as a reference. Vesper 2 will be a separately designed codebase after product approval.
 
 ## 2026-10-11 — Search & Stability update (awaiting APK verification)
 
