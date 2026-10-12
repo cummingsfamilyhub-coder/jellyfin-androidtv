@@ -1,26 +1,27 @@
 # Vesper — project home
 
-**Purpose:** A responsive, privately hosted media experience for the household and eventually invited relatives: video, music, requests, books/audiobooks and (later) offline downloads. Maintain one existing Jellyfin-derived Android codebase with touch-first mobile and TV surfaces.
+**Current product direction (12 October 2026): Vesper 2 is a new, purpose-built application.** Preserve Vesper 1 untouched as the working reference. The existing NAS services and media remain; client architecture and UX are being designed from desired outcomes backwards.
 
-## Where everything lives
-- **Code and living documentation:** `cummingsfamilyhub-coder/jellyfin-androidtv`, active branch `vesper-mobile-vnext`.
-- **What we're doing right now:** [`VESPER_STATUS.md`](VESPER_STATUS.md). Always read this first and confirm the live branch head; dates and commits here are historical if the repository has advanced.
-- **Architecture and NAS boundary:** [`docs/VESPER_ARCHITECTURE.md`](docs/VESPER_ARCHITECTURE.md).
-- **Phase gates and sequencing:** [`docs/VESPER_ROADMAP.md`](docs/VESPER_ROADMAP.md).
-- **Security, credentials and backup controls:** [`docs/VESPER_SECURITY.md`](docs/VESPER_SECURITY.md).
-- **Session, change and APK hand-off:** [`docs/VESPER_DELIVERY.md`](docs/VESPER_DELIVERY.md).
-- **Regression and acceptance checks:** [`docs/VESPER_TEST_MATRIX.md`](docs/VESPER_TEST_MATRIX.md).
-- **Decisions and open questions:** [`docs/VESPER_DECISIONS.md`](docs/VESPER_DECISIONS.md).
-- **ChatGPT Project instructions:** [`PROJECT_INSTRUCTIONS.md`](PROJECT_INSTRUCTIONS.md).
+## Read in this order
+1. [Vesper 2 product definition](docs/VESPER_V2_PRODUCT.md) — the **current** agreed direction and next design deliverable.
+2. [Decision register](docs/VESPER_DECISIONS.md) — dated decisions, superseded V1 choices and remaining open choices.
+3. [VESPER_STATUS.md](VESPER_STATUS.md) — V1 historical implementation/release evidence; current V2 stage is marked at the top.
+4. [Vesper roadmap](docs/VESPER_ROADMAP.md) — V2 gates at the top, V1 historical plan retained for audit.
+5. [Vesper architecture](docs/VESPER_ARCHITECTURE.md) — currently records the older V1 migration target; **not final V2 technical design**.
+6. [Security](docs/VESPER_SECURITY.md), [delivery](docs/VESPER_DELIVERY.md), [test matrix](docs/VESPER_TEST_MATRIX.md) — V1 learnings to carry forward selectively.
+7. [ChatGPT Project instructions](PROJECT_INSTRUCTIONS.md).
 
-## Latest agreed direction (11 October 2026)
-1. **Preserve Vesper**; do not start over or polish the UI for its own sake.
-2. **NAS-first shared state and secrets**, native Android presentation and playback for speed and reliable controls. A device will still require a scoped authentication token and local files for offline media.
-3. **Baseline and risk audit first**, then an incremental Vesper Gateway, controlled migration and a measured refactor, then offline video.
-4. Never assume a source commit has been built or installed. The current status file must keep distinct: **source head / CI / published APK / installed and user-tested version**.
+## Product identity
+Six core media domains: Movies, TV, Music, Audiobooks, Podcasts and eBooks. Live TV remains undecided and optional.
 
-## Known working product baseline
-User screenshots on 11 October show a working video Home/Continue Watching hero, Movies and TV grids, Services and collections, music hero/mini-player, artists and grouped genre filter, MyV music, and a unified Search landing screen. These visuals are observations, not proof of every API or offline feature. The exact installed APK commit shown in screenshots was **not independently verified**. Existing code includes Jellyfin, Music Assistant, Seerr, Aurral, LazyLibrarian and Audiobookshelf integration points; configuration and end-to-end availability vary.
+**MyV is the unified, personalised home** and the expected main destination. Watch / Listen / Read handle deeper exploration. Global Search and profile controls in the header. Minimal design, progressive disclosure and a collapsible sidebar; no permanent bottom dock.
 
-## Working style
-A new chat in the **Vesper app** ChatGPT Project should simply ask: **“Continue Vesper from the current repo and VESPER_STATUS.md. What's the next agreed milestone?”** The assistant should verify the current repo itself; no pasted encyclopaedic handover prompt.
+Vesper runs fast native clients backed by the NAS as shared source of truth for settings, per-user data and privileged service credentials. Some client-local cache, short-lived authentication and downloads are necessary. Don't assume the gateway, exact libraries or client framework are locked until the architecture design is signed off.
+
+## Working reference (Vesper 1)
+Source: `cummingsfamilyhub-coder/jellyfin-androidtv`, branch `vesper-mobile-vnext`.
+V1 includes Jellyfin playback, Music Assistant, discovery/requests, MyV, profiles and genre filtering. Do not silently identify source commits with user-tested APKs. No V2 repository or APK exists yet.
+
+## Immediate milestone
+**Design the MyV-first navigation and screen map** for mobile, unfolded foldable and TV before implementation.
+Definition of done: user approves entry screen, global navigation, how MyV combines media, and the main Watch/Listen/Read flows. Then derive architecture and a small implementation proof from the approved designs.
