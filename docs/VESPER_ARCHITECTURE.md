@@ -1,3 +1,7 @@
+# Vesper 1 migration architecture — historical reference
+
+**Superseded as an implementation plan on 2026-10-12.** Vesper 2 will be a new client built from an approved product design. Its NAS-first/native-fast *principle* is retained, but precise gateway/database/auth contracts are undecided. See [Vesper 2 product brief](VESPER_V2_PRODUCT.md). Do not treat the architecture below as V2-approved code or deployed services.
+
 # Vesper target architecture — NAS-first, native-fast
 
 Status: **agreed direction**, not deployed gateway architecture. Updated 2026-10-11.
