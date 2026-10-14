@@ -10,11 +10,15 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.VesperServiceConfig
+import org.jellyfin.androidtv.auth.repository.SessionRepository
+import org.jellyfin.androidtv.auth.repository.SessionRepositoryState
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.preference.UserSettingPreferences
 import org.jellyfin.androidtv.ui.browsing.MainActivity
 import org.jellyfin.androidtv.ui.playback.MediaManager
 import org.jellyfin.androidtv.ui.playback.PlaybackLauncher
+import org.jellyfin.androidtv.ui.playback.JellyfinMediaAuthInterceptor
 import org.jellyfin.androidtv.ui.playback.VideoQueueManager
 import org.jellyfin.androidtv.ui.playback.rewrite.RewriteMediaManager
 import org.jellyfin.androidtv.util.profile.createDeviceProfile
@@ -25,7 +29,9 @@ import org.jellyfin.playback.media3.exoplayer.exoPlayerPlugin
 import org.jellyfin.playback.media3.session.MediaSessionOptions
 import org.jellyfin.playback.media3.session.media3SessionPlugin
 import org.jellyfin.sdk.api.client.HttpClientOptions
+import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.okhttp.OkHttpFactory
+import org.jellyfin.sdk.api.client.util.AuthorizationHeaderBuilder
 import org.koin.android.ext.koin.androidContext
 import kotlin.time.Duration
 import org.koin.core.scope.Scope
@@ -42,12 +48,31 @@ val playbackModule = module {
 
 	single<HttpDataSource.Factory> {
 		val okHttpFactory = get<OkHttpFactory>()
+		val sessionRepository = get<SessionRepository>()
+		val api = get<ApiClient>()
 		val httpClientOptions = get<HttpClientOptions>().copy(
 			// Disable request timeout for media playback as this causes issues with Live TV
 			requestTimeout = Duration.ZERO
 		)
 
-		OkHttpDataSource.Factory(okHttpFactory.createClient(httpClientOptions))
+		val mediaClient = okHttpFactory.createClient(httpClientOptions).newBuilder()
+			.addNetworkInterceptor(JellyfinMediaAuthInterceptor(VesperServiceConfig.JELLYFIN_BASE_URL) {
+				val session = sessionRepository.currentSession.value
+				if (sessionRepository.state.value != SessionRepositoryState.READY ||
+					session == null ||
+					api.accessToken != session.accessToken ||
+					api.baseUrl?.trimEnd('/') != VesperServiceConfig.JELLYFIN_BASE_URL
+				) null else AuthorizationHeaderBuilder.buildHeader(
+					api.clientInfo.name,
+					api.clientInfo.version,
+					api.deviceInfo.id,
+					api.deviceInfo.name,
+					session.accessToken,
+				)
+			})
+			.build()
+
+		OkHttpDataSource.Factory(mediaClient)
 	}
 
 	single { createPlaybackManager() }

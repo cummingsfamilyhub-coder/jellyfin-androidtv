@@ -16,6 +16,7 @@ import org.jellyfin.androidtv.ui.preference.dsl.OptionsFragment
 import org.jellyfin.androidtv.ui.preference.dsl.action
 import org.jellyfin.androidtv.ui.preference.dsl.checkbox
 import org.jellyfin.androidtv.ui.preference.dsl.enum
+import org.jellyfin.androidtv.ui.preference.dsl.info
 import org.jellyfin.androidtv.ui.preference.dsl.list
 import org.jellyfin.androidtv.ui.preference.dsl.optionsScreen
 import org.jellyfin.androidtv.ui.preference.dsl.seekbar
@@ -102,9 +103,9 @@ class PlaybackAdvancedPreferencesScreen : OptionsFragment() {
 				bind(userPreferences, UserPreferences.pgsDirectPlay)
 			}
 
-			checkbox {
+			info {
 				setTitle(R.string.pref_external_player)
-				bind(userPreferences, UserPreferences.useExternalPlayer)
+				setContent(R.string.pref_external_player_protected_summary)
 			}
 		}
 
