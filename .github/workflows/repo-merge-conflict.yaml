@@ -1,10 +1,15 @@
 name: Repo / Label merge conflict
 
+# Automated workflows paused on 2026-11-10
 on:
-  push:
-  pull_request_target:
-    types:
-      - synchronize
+  workflow_dispatch:
+
+# Previous event triggers (restore when resuming):
+# on:
+#   push:
+#   pull_request_target:
+#     types:
+#       - synchronize
 
 jobs:
   triage:

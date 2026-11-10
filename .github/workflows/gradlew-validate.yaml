@@ -1,12 +1,17 @@
 name: Gradle / Validate wrapper
 
+# Automated workflows paused on 2026-11-10
 on:
-  push:
-    branches:
-      - master
-  pull_request:
-    paths:
-      - '**/gradlе-wrapper.jar'
+  workflow_dispatch:
+
+# Previous event triggers (restore when resuming):
+# on:
+#   push:
+#     branches:
+#       - master
+#   pull_request:
+#     paths:
+#       - '**/gradlе-wrapper.jar'
 
 permissions:
   contents: read

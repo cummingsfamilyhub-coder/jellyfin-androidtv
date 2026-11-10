@@ -1,9 +1,14 @@
 name: App / Publish
 
+# Automated workflows paused on 2026-11-10
 on:
-  push:
-    tags:
-      - v*
+  workflow_dispatch:
+
+# Previous event triggers (restore when resuming):
+# on:
+#   push:
+#     tags:
+#       - v*
 
 jobs:
   publish:

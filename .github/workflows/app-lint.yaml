@@ -1,11 +1,16 @@
 name: App / Lint
 
+# Automated workflows paused on 2026-11-10
 on:
-  push:
-    branches:
-      - master
-      - release-*
-  pull_request:
+  workflow_dispatch:
+
+# Previous event triggers (restore when resuming):
+# on:
+#   push:
+#     branches:
+#       - master
+#       - release-*
+#   pull_request:
 
 permissions:
   contents: read
